@@ -1,0 +1,467 @@
+---
+title: "visualizations"
+author: "Ellie White"
+date: "June 24, 2019"
+output: html_document
+---
+
+# 1.0 Data Gathering 
+```{r dataset} 
+df <- readRDS('inputdata/moddf.rds')
+dfc <- readRDS('inputdata/moddfc.rds')
+
+# remove DOMGEOLOGY cause it's causing problems
+df <- df[ , !(colnames(df) %in% c("DOMGEOLOGY"))]
+dfc <- dfc[ , !(colnames(dfc) %in% c("DOMGEOLOGY"))]
+
+# order by baisn name
+df <- df[order(df$CDEC_ID), ]
+row.names(df) <- 1:nrow(df)
+dfc <- dfc[order(dfc$CDEC_ID), ]
+row.names(dfc) <- 1:nrow(dfc)
+
+# check this
+dim(df) == dim(dfc)
+
+# get rid of negative flows
+# 1st of all WHY THE FUCK ARE THERE NEGATIVE FLOWS IN THE DATA? inverstigate this later.
+# 2nd make sure the dates that have negative flows in the original dataset is removed from the cumulative dataset too. Afterall, these cumulative values are calculated from the original dataset and negative flow don't make sense there, so their cumulative doesn't make sense in this dataset either. 
+moddf <- df[df$FLOW>=0 & dfc$FLOW>=0, ]
+moddfc <- dfc[df$FLOW>=0 & dfc$FLOW>=0 , ]
+
+# check if all the negatives are gone from moddf and moddfc
+tbd <- moddf[moddf$FLOW<0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+tbd <- moddfc[moddfc$FLOW<0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+remove(tbd)
+
+# check this
+dim(moddf) == dim(moddfc)
+
+# seperate the agg and inc datasets
+moddf_agg <- moddf[1:(which(moddf$CDEC_ID=="AMA_INC")[1]-1), ]
+moddf_inc <- moddf[which(moddf$CDEC_ID=="AMA_INC")[1]:nrow(moddf), ]
+moddf_cagg <- moddfc[1:(which(moddfc$CDEC_ID=="AMA_INC")[1]-1), ]
+moddf_cinc <- moddfc[which(moddfc$CDEC_ID=="AMA_INC")[1]:nrow(moddfc), ]
+
+# should I do this, or hand it in the functions for modeling? to keep the integrity of the data
+moddf_agg <- na.omit(moddf_agg)
+moddf_inc <- na.omit(moddf_inc)
+moddf_cagg <- na.omit(moddf_cagg)
+moddf_cinc <- na.omit(moddf_cinc)
+```
+
+```{r flow_data} 
+# wide format data
+cdec_fnf_wide <- read.csv('inputdata/cdec_fnf_wide.csv')
+cdec_fnf_wide$DATE <- as.Date(cdec_fnf_wide$DATE, format="%Y-%m-%d")
+cdec_fnf_wide <- cdec_fnf_wide[order(cdec_fnf_wide$DATE),]
+
+# The full records span 1900-01-01 to 1980-09-01, but most records start at 1982
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>="1982-01-01", ]
+```
+
+```{r spatial_data}
+library(raster)
+library(sp)
+library(dismo)
+library(rgdal)
+# basins <- read.csv("inputdata/cdec_fnf_stations_data_minus_sfj_otr_bhn_ftm_sfr_sjm.csv", stringsAsFactors = FALSE)
+basins <- readRDS("inputdata/basins.rds")
+caboundary <-  shapefile('inputdata/dwr_ca_boundary/California_Boundary.shp')
+cacounties <- readRDS("inputdata/counties.rds")
+
+# get spatial data for plotting purposes
+moddfsp <- moddf_agg # make a copy 
+
+coordinates(moddfsp) <- ~LONGITUDE + LATITUDE
+proj4string(moddfsp) <- CRS("+proj=longlat +datum=WGS84")
+moddfsp <- spTransform(moddfsp, proj4string(cacounties))
+
+ta <- CRS("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=km +ellps=GRS80")
+
+# spatial plot of outlet of basins
+moddfsp <- spTransform(moddfsp, ta)
+cacounties <- spTransform(cacounties, ta)
+basinssp <- spTransform(basins, ta)
+caboundary <- spTransform(caboundary, ta)
+
+basins_agg <- basins[1:(which(basins$CDEC_ID=="AMA_INC")[1]-1), ]
+basins_inc <- basins[which(basins$CDEC_ID=="AMA_INC")[1]:nrow(basins), ]
+```
+
+# 2.0 Plots
+
+## 2.1 Plot Elements
+```{r labels}
+library(Hmisc) 
+
+# for model data frame
+# remember we deleted "Dominant Geology" column
+var_labels <- c("Date","Basin ID", "Basin Name", "River Basin", "County", "Operator", "Station Above #1", "Station Above #2", "Station Above #3", "Station Above #4", "Hierarchy", "Lon", "Lat", "Month", "Ordinal Month", "Season", "Year", "Water Year", "Temperature", "Tmp Lag 1m", "Tmp Lag 2m", "Tmp Lag 3m", "Precipitation", "Ppt Lag 1m", "Ppt Lag 2m", "Ppt Lag 3m", "Snow", "Drainage Area", "Shape", "Compactness", "Mean Elevation", "Relief Ratio", "Sat. Hyd. Conductivity", "% Silt", "% Sand", "% Clay", "Avail. Water Cont.", "Lambda Pore Size", "N Pore Size", "Depth to Restricted Layer", "Percent Vegetated", "Unimpaired Flow" ) 
+
+names(var_labels) <- names(moddf_agg)
+Hmisc::label(moddf_agg) <- lapply(names(var_labels), function(x) Hmisc::label(moddf_agg[,x]) = var_labels[x])
+
+# for basin spatial data frame
+var_labels <- c("Basin ID", "Basin Name", "River Basin", "County", "Operator", "Station Above #1", "Station Above #2", "Station Above #3", "Station Above #4", "Hierarchy", "Lon", "Lat", "Drainage Area", "Shape", "Compactness", "Mean Elevation", "Max Elevation", "Relief Ratio", "Sat. Hyd. Conductivity", "% Silt", "% Sand", "% Clay", "Avail. Water Cont.", "Lambda Pore Size", "N Pore Size", "Depth to Restricted Layer", "Percent Vegetated", "Dominant Geology" ) 
+
+names(var_labels) <- names(basins_agg@data)
+Hmisc::label(basins_agg@data) <- lapply(names(var_labels), function(x) Hmisc::label(basins_agg@data[,x]) = var_labels[x])
+Hmisc::label(basins_inc@data) <- lapply(names(var_labels), function(x) Hmisc::label(basins_inc@data[,x]) = var_labels[x])
+
+# summary stats
+summary(moddf_agg$FLOW)
+round(apply(moddf_agg[,17:(ncol(moddf_agg))],2,summary),2)
+round(apply(basins_agg@data[,13:27],2,summary),2)
+round(apply(basins_inc@data[,13:27],2,summary),2)
+```
+
+```{r visuals}
+# colourblind palettes
+# The palette with grey:
+cbpgrey <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#0072B2", "#D55E00")
+
+# The palette with black:
+cbpblack <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#0072B2", "#D55E00")
+
+cols <- character(nrow(moddf_agg))
+cols[] <- "black"
+cols[moddf_agg$FLOW >= mean(moddf_agg$FLOW)] <- cbpblack[3]
+cols[moddf_agg$FLOW < mean(moddf_agg$FLOW)] <- cbpblack[2]
+
+plot(moddf_agg$FLOW, main="Observed Response Data", ylab="Total Unimpaired Flow (AF/m)", col=cols)
+
+# library(tabplot)
+# tableplot(moddf_agg[,c(1:14, ncol(moddf_agg))], sortCol="CDEC_ID")
+# tableplot(moddf_agg[,c(1:2, 15:ncol(moddf_agg))], sortCol="CDEC_ID") 
+```
+
+## 2.2 1D Plots
+```{r pdf_cdf_plots} 
+# use the ecdf() function to obtain the empirical CDF values
+png('ch0 data prep/outputdata/rplot01_flowcdf.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4.5,1,1)+0.1)
+plot(ecdf(moddf_agg$FLOW),log='x',xlim=c(0.1,1e+7), xlab='', ylab = '', main="", do.points=TRUE, panel.first=c(abline(v=c(seq(1e-1, 1e+1, 1), seq(1e+1, 1e+3, 1e+2), seq(1e+3, 1e+5, 1e+4), seq(1e+5, 1e+7, 1e+6)), lty=3, col="grey"), abline(h=seq(0,1,0.2), lty=3, col="grey")))
+# add label for y-axis
+# the "line" option is used to set the position of the label
+mtext(text = expression(hat(F)[n](x)), side = 2, line = 3)
+mtext(text='Percentiles for Unimpaired Flow', side=2, line=2)
+mtext(text='Sorted Unimpaired Flow (AF/m)', side=1, line=2)
+dev.off()
+
+# # or use this method for plotting the Empirical Cumluative Distribution
+# flow_ordered <- sort(moddf_agg$FLOW)
+# n <- sum(!is.na(moddf_agg$FLOW))
+# # notice the option type = 's' for plotting the step functions
+# plot(flow_ordered, (1:n)/n, type = 's', ylim = c(0, 1), xlab = 'Sorted Monthly Unimpaired Flow', ylab = '', main = '', xlim=c(0.1,max(moddf_agg$FLOW)), log='x')
+# mtext(text = expression(hat(F)[n](x)), side = 2, line = 2.5)
+
+png('ch0 data prep/outputdata/rplot01_flowcdf2.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4.5,1,1)+0.1)
+plot(ecdf(moddf_agg$FLOW),xlim=c(0.1,5e+6), xlab='', ylab = '', main="", do.points=TRUE, panel.first=c(abline(v=seq(0, 1e+7, 1e6), lty=3, col="grey"), abline(h=seq(0,1,0.2), lty=3, col="grey")))
+# add label for y-axis
+# the "line" option is used to set the position of the label
+mtext(text = expression(hat(F)[n](x)), side = 2, line = 3)
+mtext(text='Percentiles for Unimpaired Flow', side=2, line=2)
+mtext(text='Sorted Unimpaired Flow (AF/m)', side=1, line=2)
+dev.off()
+```
+
+```{r hist_plots} 
+# histogram with kernel density estimate
+png('ch0 data prep/outputdata/rplot02_histkdp.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+hist(moddf_agg$FLOW, breaks=20, freq=FALSE, xlab='Total Unimpaired Flow (AF/m)', ylab='Relative Frequency', main='', xlim=c(0,max(moddf_agg$FLOW, na.rm=TRUE)), ylim=c(0,5e-06), cex.axis=0.8)
+lines(density(moddf_agg$FLOW, na.rm=TRUE), lty=3, lwd=1, col=cbpblack[7])
+legend("topright", inset=0.05, cex=0.8, c("histogram", "kernal density"), horiz=FALSE, lty=c(1,3), bg="grey96", col=c("black", cbpblack[7]), box.lty=0)
+dev.off()
+
+# Notice how the histogram rises quickly for low values of flow, then decreases gradually.  The gamma distribution has this behaviour.  However, in order to define the gamma function, we need a way to estimate the parameters.
+# histogram with gamma density curve
+png('ch0 data prep/outputdata/rplot03_histgdc.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+hist(moddf_agg$FLOW, breaks=20, freq=FALSE, xlab='Total Unimpaired Flow (AF/m)', ylab='Relative Frequency', main='', xlim=c(0,max(moddf_agg$FLOW, na.rm=TRUE)), ylim=c(0,5e-06), cex.axis=0.8)
+curve(dgamma(x, shape = mean(moddf_agg$FLOW)^2/var(moddf_agg$FLOW), scale = var(moddf_agg$FLOW)/mean(moddf_agg$FLOW)), add=TRUE, col=cbpblack[7], lwd=1, lty=3)
+legend("topright", inset=0.05, cex=0.8, c("histogram", "gamma density curve"), horiz=FALSE, lty=c(1,3), bg="grey96", col=c("black", cbpblack[7]), box.lty=0)
+dev.off()
+```
+
+```{r box_plots}
+library(ggplot2)
+
+# order months in moddf_agg for boxplots
+moddf_agg_c <- moddf_agg
+moddf_agg_c$MONTH <- factor(moddf_agg$MONTH, levels=c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"))
+moddf_agg_c$COLOR <- cbpblack[1:5][moddf_agg_c$HIERARCHY]
+
+# Box plot with jittered points
+png('ch0 data prep/outputdata/rplot04_boxplot.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(moddf_agg_c, aes(x=MONTH, y=FLOW, col=HIERARCHY)) + 
+        geom_jitter(shape=16, position=position_jitter(0.2), alpha=0.5) +
+        geom_boxplot(outlier.shape=NA) +
+        labs(x="", y="Total Unimpaired Flow (AF/m)", col="Basin Hierarchy") +
+        scale_color_manual(values=cbpblack[1:5]) +
+        theme_bw(base_size = 8) +
+        theme(legend.position=c(0.9,0.75), legend.background=element_rect(fill="grey96"))
+dev.off()
+
+png('ch0 data prep/outputdata/rplot05_flowvslat.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(moddf_agg_c, aes(x=LATITUDE, y=FLOW, color=HIERARCHY)) + 
+        geom_jitter(shape=16, position=position_jitter(0.1), alpha=0.5) +
+        labs(x="Latitude (Deg)", y="Total Unimpaired Flow (AF/m)", col="Basin Hierarchy") +
+        scale_color_manual(values=cbpblack[1:5]) +
+        theme_bw(base_size = 8) +
+        theme(legend.position=c(0.1,0.75), legend.background=element_rect(fill="grey96"))
+dev.off()
+```
+
+## 2.3 2D Plots
+```{r correlation_plots}
+png('ch0 data prep/outputdata/rplot05_tmpvsppt.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+plot(moddf_agg$PPT, moddf_agg$TMP, col=alpha(cols, 0.2), xlab="", ylab="", pch=16)
+title(xlab="Precipitation (mm)", line=2)
+title(ylab=substitute(paste('Temperature', B * degree, "C)"),  list(B = " (")), line=2)
+legend("topright", inset=0.05, cex=0.8, c("low flow", "high flow"), horiz=FALSE, pch=c(16,16), col=c(cbpblack[2], cbpblack[3]), bg="grey96", box.lty=0)
+dev.off()
+
+# or do this
+library(hexbin)
+library(RColorBrewer)
+colspect <- colorRampPalette(rev(brewer.pal(11,'Spectral')))
+colspect <- colspect(32)
+png('ch0 data prep/outputdata/rplot05_tmpvsppt2.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+hexbinplot(TMP ~ PPT, data=moddf_agg, xlab="Precipitation (mm)", ylab=substitute(paste('Temperature', B * degree, "C)"), list(B = " (")), xbins=100, shape=4/8, colorkey=TRUE, IDs=TRUE, aspect=1, colramp= function(n){plinrain(n,beg=200,end=1)}, trans=log, inv=exp, mincnt=1, maxcnt=250)
+dev.off()
+
+# bubble plot
+library(gridExtra)
+library(grid)
+png('ch0 data prep/outputdata/rplot05_tmpvsppt3.png', width=6.5, height=3.5, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+myplot <- ggplot(moddf_agg, aes(x=PPT, y=TMP, size=FLOW, fill=CDEC_ID)) +
+        geom_point(alpha=0.5, shape=21) +
+        labs(x="Precipitation (mm)", y=substitute(paste('Temperature', B * degree, "C)"),  list(B = " ("))) +
+        scale_size_area(max_size = 10) +
+        theme_bw() +
+        scale_color_gradientn(colours = rainbow(length(levels(moddf_agg$CDEC_ID)))) +
+        labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basins") +
+        guides(fill = FALSE) +
+        annotation_custom(grob = textGrob("Each of the 68 basins is in a different color."), xmin = 1.137*max(moddf_agg$PPT), xmax = 1.137*max(moddf_agg$PPT), ymin = -4.5, ymax = -4.55)
+# Turn off clipping to the plot panel
+myplotg <- ggplotGrob(myplot)
+myplotg$layout$clip[myplotg$layout$name == "panel"] = "off"
+grid.draw(myplotg)
+dev.off()
+
+png('ch0 data prep/outputdata/rplot05_tmpvsppt4.png', width=6.5, height=3.5, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+ggplot(moddf_agg, aes(x=PPT, y=TMP, size=FLOW, fill=HIERARCHY)) +
+        geom_point(alpha=0.5, shape=21) +
+        labs(x="Precipitation (mm)", 
+             y=substitute(paste('Temperature', B * degree, "C)"),  list(B = " ("))) +
+        scale_size_area(max_size = 10) +
+        theme_bw() +
+        labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basin Hierarchy") +
+        scale_fill_manual(values = cbpblack[1:5])
+dev.off()
+
+png('ch0 data prep/outputdata/rplot05_pptvsflow.png', width=8, height=3.5, units="in", pointsize=10, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+ggplot(moddf_agg, aes(x=PPT, y=FLOW, size=AREASQKM, fill=HIERARCHY)) +
+        geom_point(alpha=0.5, shape=21) +
+        labs(x="Precipitation (mm)", 
+             y="Total Unimpaired Flow (AF/m)") +
+        scale_size_area(max_size = 10) +
+        theme_bw() +
+        labs(size= "Drainage Area (Sqm)", fill = "Basin Hierarchy") +
+        scale_fill_manual(values = cbpblack[1:5])
+dev.off()
+
+png('ch0 data prep/outputdata/rplot05_pptvsarea.png', width=8, height=3.5, units="in", pointsize=10, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+ggplot(moddf_agg, aes(x=PPT, y=AREASQKM, size=FLOW, fill=HIERARCHY)) +
+        geom_point(alpha=0.5, shape=21) +
+        labs(x="Precipitation (mm)", 
+             y="Drainage Area (Sqm)") +
+        scale_size_area(max_size = 10) +
+        theme_bw() +
+        labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basin Hierarchy") +
+        scale_fill_manual(values = cbpblack[1:5])
+dev.off()
+```
+
+## 2.4 3D Plots
+```{r 3dplots}
+library(plotly)
+png('ch0 data prep/outputdata/rplot05_tmpvsppt5.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,4,1,1)+0.1)
+plot_ly(moddf_agg, x=~PPT, y=~AREASQKM, z=~FLOW, type="scatter3d", mode="markers", color=~HIERARCHY)
+dev.off()
+
+moddf_agg_c <- moddf_agg
+moddf_agg_c$COLOR <- cbpgrey[1:5][moddf_agg_c$HIERARCHY]
+plot_ly(moddf_agg_c, x = ~PPT, y = ~AREASQKM, z = ~FLOW, type="scatter3d", mode="markers",
+        marker=list(color = ~COLOR, showscale = TRUE)) %>%
+        add_markers() %>% 
+        layout(scene = list(xaxis = list(title = 'Percipitation (mm)'),
+                            yaxis = list(title = 'Drainage Area (sqkm)'),
+                            zaxis = list(title = 'Total Unimpaired Flow (AF/m)')),
+               annotations = list(
+                       x = 1.13,
+                       y = 1.05,
+                       text = 'Basin Hierarchy',
+                       showarrow = FALSE
+                       )
+               )
+
+library("scatterplot3d")
+scatterplot3d(moddf_agg_c[,c("PPT", "AREASQKM", "FLOW")], pch = 16, color=moddf_agg_c$COLOR, grid=TRUE, type="h")
+legend("top", legend = levels(moddf_agg_c$HIERARCHY), pch = 16, xpd = TRUE, horiz = TRUE, col=cbpgrey[1:5], title="Basin Hierarchy", inset = c(-0.5))
+```
+
+## 2.5 Scatter Plots
+```{r scatterplot_matrix}
+library(hexbin)
+png('ch0 data prep/outputdata/rplot06_scatterplotmatrix1.png', width=6.5, height=6.5, units="in", pointsize=10, res=1200)
+# some changes to diag.panel in order to show the univariate density of each variable
+splom(moddf_agg[ ,17:ncol(moddf_agg)],
+ panel=panel.hexbinplot,
+ diag.panel = function(x, ...){
+ yrng <- current.panel.limits()$ylim
+ d <- density(x, na.rm=TRUE)
+ d$y <- with(d, yrng[1] + 0.95 * diff(yrng) * y / max(y) )
+ panel.lines(d)
+ diag.panel.splom(x, ...)
+ col= 'darkblue'
+ },
+ lower.panel = function(x, y, ...){
+ panel.hexbinplot(x, y, ...)
+ panel.loess(x, y, ..., col = 'red')
+ },
+ pscale=0, varname.cex=0.3,
+ xlab='',
+ main='', 
+ varnames=Hmisc::label(moddf_agg)[17:ncol(moddf_agg)]
+ )
+dev.off()
+
+png('ch0 data prep/outputdata/rplot06_scatterplotmatrix2.png', width=6.5, height=6.5, units="in", pointsize=10, res=1200)
+splom(moddf_agg[,c(17:31, ncol(moddf_agg))],
+ panel=panel.hexbinplot,
+ diag.panel = function(x, ...){
+ yrng <- current.panel.limits()$ylim
+ d <- density(x, na.rm=TRUE)
+ d$y <- with(d, yrng[1] + 0.95 * diff(yrng) * y / max(y) )
+ panel.lines(d)
+ diag.panel.splom(x, ...)
+ col= 'darkblue'
+ },
+ lower.panel = function(x, y, ...){
+ panel.hexbinplot(x, y, ...)
+ panel.loess(x, y, ..., col = 'red')
+ },
+ pscale=0, varname.cex=0.3,
+ xlab='',
+ main='', 
+ varnames=Hmisc::label(moddf_agg)[c(17:31, ncol(moddf_agg))]
+ )
+dev.off()
+
+# panel.cor <- function(x, y, digits = 2, cex.cor, ...)
+# {
+#   usr <- par("usr"); on.exit(par(usr))
+#   par(usr = c(0, 1, 0, 1))
+#   # correlation coefficient
+#   r <- cor(x, y)
+#   txt <- format(c(r, 0.123456789), digits = digits)[1]
+#   txt <- paste("r= ", txt, sep = "")
+#   text(0.5, 0.6, txt)
+# 
+#   # p-value calculation
+#   p <- cor.test(x, y)$p.value
+#   txt2 <- format(c(p, 0.123456789), digits = digits)[1]
+#   txt2 <- paste("p= ", txt2, sep = "")
+#   if(p<0.01) txt2 <- paste("p= ", "<0.01", sep = "")
+#   text(0.5, 0.4, txt2)
+# }
+# pairs(moddf_agg[,c(5, 9:17, ncol(moddf_agg))], upper.panel=panel.cor)
+# hexplom(moddf_agg[,c(6:12, ncol(moddf_agg))])
+
+# library(hexbin)
+# library(RColorBrewer)
+# colspect <- colorRampPalette(rev(brewer.pal(11,'Spectral')))
+# colspect <- colspect(32)
+# png('Output Data and Visualizations/Rplot04_flow.png', width=4, height=3.5, units="in", pointsize=10, res=1200)
+# par(mar=c(4,4,1,1)+0.1, ps=8, cex=1)
+# hexbinplot(FLOW ~ PPT, data=moddf_agg, xlab="Precipitation (mm)", ylab="Total Unimpaired Flow (AF/m)", xbins=20, colorkey=TRUE, IDs=TRUE)
+# dev.off()
+```
+
+```{r corrplot}
+# draw a correlolgram
+library(corrplot)
+png('ch0 data prep/outputdata/rplot07_corrplot.png', width=6.5, height=5.69, units="in", pointsize=8, res=1200)
+par(mar=c(4,1,0,0)+0.1)
+cols <- colorRampPalette(c(cbpblack[2],'grey80',cbpblack[3]))
+moddf_agg_c <- moddf_agg
+colnames(moddf_agg_c) <- Hmisc::label(moddf_agg)
+corrplot(cor(moddf_agg_c[,-c(1:16)]), order="hclust", tl.col="black", method="color", addCoef.col="white",  addCoefasPercent=TRUE, col=cols(100), tl.pos="lt", diag=FALSE, cl.pos="r", tl.cex=1, number.cex=0.7, tl.srt = 90)
+dev.off()
+```
+
+```{r cor_dotchart}
+library(Hmisc)
+png('ch0 data prep/outputdata/rplot08_corrwithflow.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,11,1,1)+0.1)
+corrdf <- cor(moddf_agg[,-c(1:16)])
+corrdf <- corrdf[ncol(corrdf), 1:ncol(corrdf)]
+corrdf <- merge(data.frame(corrdf), data.frame(Hmisc::label(moddf_agg)), by=0)
+corrdf <- corrdf[order(corrdf$corrdf,decreasing=FALSE),]
+dotchart(corrdf[,2], xlim=c(-0.5,1.1), xlab="Correlation With \n Unimpaired Flow", pch=19, pt.cex = 0.7, panel.first=abline(v=0, col=cbpblack[3], lty=2))
+axis(side = 2, seq_along(corrdf[,2]), corrdf[,3], las=1, tick=FALSE, cex.axis=0.7) 
+text(x=corrdf[1:nrow(corrdf),2], y=1:nrow(corrdf), labels=round(corrdf[1:nrow(corrdf),2],2), pos=4, cex=0.7)
+dev.off()
+
+# In R, there are several packages for getting the partial correlation coefficients along with the t- test for checking their significance level. Use the package to compute the partial correlation coefficients along with the t-statistic and corresponding p-values.corpcor had a better way of calculating the partial correlations without so many errors in the covariance matrix not being positive definite and being singular.
+
+library(corpcor) # cor2pcor computes the pairwise partial correlation coefficients from either a correlation or a covariance matrix
+png('ch0 data prep/outputdata/rplot08_partialcorrwithflow.png', width=3.5, height=3, units="in", pointsize=8, res=1200)
+par(mar=c(4,11,1,1)+0.1)
+corrdf <- cor(moddf_agg_c[,-c(1:16)])
+pcorrdf <- cor2pcor(corrdf)
+pcorrdf <- pcorrdf[ncol(pcorrdf), 1:ncol(pcorrdf)]
+pcorrdf <- cbind(data.frame(pcorrdf), data.frame(Hmisc::label(moddf_agg_c)[-c(1:16)]))
+colnames(pcorrdf)[2] <- "LABEL"
+pcorrdf <- pcorrdf[order(pcorrdf$pcorrdf,decreasing=FALSE),]
+dotchart(pcorrdf[,1], xlim=c(-0.5,1.1), xlab="Partial Correlation \n With Unimpaired Flow", pch=19, pt.cex=0.7)
+axis(side = 2, seq_along(pcorrdf[,1]), pcorrdf[,2], las=1, tick=FALSE, cex.axis=0.7) 
+text(x=pcorrdf[1:nrow(pcorrdf),1], y=1:nrow(pcorrdf), labels=round(pcorrdf[1:nrow(pcorrdf),1],2), pos=4, cex=0.7)
+abline(v=0, col=cbpblack[3], lty=2)
+dev.off()
+```
+
+## 2.6 Spatial Plots
+```{r spatial_plots}
+png('ch0 data prep/outputdata/rplot09_map.png', width=3.25, height=5, units="in", pointsize=10, res=1200)
+par(mar=c(0,3,2,1)+0.1)
+plot(cacounties, col='white', border='white')
+plot(cacounties, col='gray88', border='white', add=TRUE)
+plot(basins, col='lightslategrey', border='white', add=TRUE)
+plot(moddfsp, col='darkblue', add=TRUE, pch=20)
+#text(moddfsp, labels=as.character(moddfsp@data$CDEC_ID), col="darkblue", cex=0.5, offset=0.25, pos=4)
+dev.off()
+
+# # plot on a basemap
+# library(leaflet)
+# davis <- leaflet() %>% setView(lng=-119.4179, lat=36.7783, zoom = 5)
+# davis %>% addTiles()
+# davis %>% addPolygons(data=spTransform(basins, CRS("+ellps=WGS84 +proj=longlat +datum=WGS84 +no_defs")), fillOpacity = 0.25)
+```

@@ -1,0 +1,565 @@
+---
+title: "modelling"
+author: "Ellie White"
+date: "March 22, 2019"
+output: html_document
+---
+
+Record of builidng different rainfall-runoff models. 
+
+# Contents   
+1.0 Data Gathering  
+2.0 Modelling 
+ 
+# Libraries  
+ 
+
+```{r, include=FALSE}
+library(knitr)
+library(formatR)
+opts_chunk$set(
+  fig.width  = 7.5,
+  fig.height = 7.5,
+  collapse   = TRUE,
+  tidy       = FALSE
+)
+```
+
+# Citations
+```{r citations}
+# cite R 
+toBibtex(citation())
+
+# cite packages
+citethese <- c("raster", "rgdal", "rgeos", "dismo", "geosphere", "prism", "sharpshootR", "reshape2")
+for(i in seq_along(citethese)){
+  x <- citation(citethese[i])
+  print(toBibtex(x))
+}
+
+sessionInfo()
+```
+
+# 1.0 Data Gathering
+```{r data_gathering}
+moddf <- readRDS('inputdata/moddf_inc.rds')
+
+# order by baisn name
+moddf <- moddf[order(moddf$CDEC_ID),]
+row.names(moddf) <- 1:nrow(moddf)
+
+# split into two one original aggregate basins and one the incremental basins
+df_agg <- moddf[1:18504,]
+df_inc <- moddf[18505:nrow(moddf),]
+
+# get rid of the negative values
+df_agg <- df_agg[df_agg$FLOW>0,]
+
+results_agg <- df_agg
+results_inc <- df_inc
+```
+
+```{r setseed}
+set.seed(3222019)
+```
+
+# 2.0 Modelling
+
+## 2.1 Linear Models
+```{r lm}
+lm_agg <- lm(FLOW~., data=df_agg[,17:ncol(df_agg)])
+summary(lm_agg)
+
+lm_inc <- lm(FLOW~., data=df_inc[,17:ncol(df_inc)])
+summary(lm_inc)
+```
+
+## 2.2 Generalized Linear Models
+```{r glm}
+glmp_agg <- glm(FLOW~. , family=poisson, data=df_agg[,17:ncol(df_agg)])
+summary(glmp_agg)
+
+glmg_inc <- glm(FLOW~. , family=gaussian, data=df_inc[,17:ncol(df_inc)])
+summary(glmg_inc)
+```
+
+## 2.3 Neural Networks
+```{r neuralnets}
+# library(nnet)
+# nn_agg1 <- nnet(FLOW ~ ., data = df_agg[ ,c(1, 17:41)], size=10)
+# 
+# # look into these settings             
+# #subset = samp, size = 2, rang = 0.1, decay = 5e-4, maxit = 200)
+# #table(df_agg$FLOW[-samp], predict(ir.nn2, df_agg[-samp,]))
+# 
+# library(neuralnet)
+# formula_numvars <- as.formula('FLOW ~ PPT + PPTLAG1 + PPTLAG2 + PPTLAG3 + SNOW + AREASQM + SHAPE + COMPACTNESS + MEANELEV + BASINRELIEFRATIO + KSAT + SILT + SAND + CLAY + AWC + LAMBDA + N + RESDT + VEGETATED')
+# nn_agg2 <- neuralnet(formula_numvars, data = df_agg[ ,c(1, 17:41)], hidden=10)
+#  
+# library(RSNNS)
+# nn_agg3 <- mlp(df_agg[c(1, 17:40)], df_agg$FLOW, size=10,linOut=TRUE)
+# 
+# library(caret)
+# nn_agg4 <- train(FLOW~.,method='nnet',data=df_agg[ ,c(1, 17:41)],linout=TRUE)
+# plot.nnet(nn_ag4, nid=TRUE)
+```
+
+Tensorflow is a numerical computing library with an interface in r. It's open-source and  hardware independent, and with it you can do modelling with huge datasets without having to put all of it in RAM.  
+
+Tensors are multi-dimensional arrays: 0D is a scalar (vector or length one), 1D is a vecotr, 2D is a matrix, and 3D and up are arrays. Examples: Dataframe with just observations are 1D or 2D (data.matrix(iris), n=10). Time series data are 3D tensors, because you have a sequence grouping, the samples are the third dimension. Images are 4D tensors, video is 5D. 
+
+Data "flows" through the graph, with nodes representing units of computation. 
+
+The "deep" in deep learning referrs to having large number of layers that transform the inputs into outputs. 
+
+Deep learning has not yet proven that it is good at analyzing data with complex spatial or sequence dependencies that are hard to model traditionally.  
+
+It's good for prediction, not necessarily understanding. 
+```{r tensorflow}
+# let's build a recurrent neural network(rnn)
+# install.packages("tensorflow")
+# install.packages("keras", type = "source")
+
+library(keras)
+install_keras()
+
+library(tensorflow)
+install_tensorflow()
+
+# check to see if all errors are resolved
+sess <-  tf$Session()
+hello <- tf$constant('Hello, TensorFlow!')
+sess$run(hello)
+
+# loading the keras inbuilt mnist dataset
+data <- data.matrix(df_inc[,11:ncol(df_inc)])
+
+# split dataset into training, validation, and tesitng
+train_data <- data[1:2000,]
+mean <- apply(train_data, 2, mean)
+std <- apply(train_data, 2, sd)
+data <- scale(data, center = mean, scale = std)
+
+train_gen
+val_gen
+test_gen
+
+# defining a keras sequential model
+model <- keras_model_sequential()
+
+# layer_flatten(input_shape = c(lookback / step, dim(data)[-1])) %>% 
+#   layer_dense(units = 32, activation = "relu") %>% 
+#   layer_dense(units = 1)
+
+# note that models in keras is modified in place, objects are not by-value like it is conventional in r, they are by-reference. 
+model %>% 
+  layer_dense(units = 784, input_shape = 784) %>% 
+  layer_dropout(rate=0.4)%>%
+  layer_activation(activation = 'relu') %>% 
+  layer_dense(units = 10) %>%  # Note the lack of activation function on the last dense layer, which is typical for a regression problem.
+
+# compiling the defined model
+model %>% compile(
+  loss = 'mae',
+  optimizer = 'optimizer_rmsprop()'
+  )
+
+# fitting the model on the training dataset, can use validation_split=0.2 inside fit too. 
+history <- model %>% fit(train_data[,1:30], train_data[,31], epochs = 100, batch_size = 128)
+
+plot(history)
+
+# evaluating model on the cross validation dataset
+# loss_and_metrics <- model %>% evaluate(test_x, test_y, batch_size = 128)
+
+# layers in keras
+# dense layers are fully connected neural networks
+# convolutional layers try to find spatial features, mostly used in computer vision, they develop filters that find patterns
+# recurrent layers have some memory or state, they can maintain states, used in sequenced applications
+# embedding layers, in NLP vecotrizing text that recognizes semantic relationships
+
+# lots of loss functions, can write your own
+# lots of optimizers
+```
+
+```{r example_tensorflow}
+dir.create("~/Downloads/tbd_climate", recursive = TRUE)
+download.file(
+  "https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip",
+  "~/Downloads/tbd_climate/jena_climate_2009_2016.csv.zip"
+)
+unzip(
+  "~/Downloads/tbd_climate/jena_climate_2009_2016.csv.zip",
+  exdir = "~/Downloads/tbd_climate"
+)
+
+library(tibble)
+library(readr)
+
+data_dir <- "~/Downloads/tbd_climate"
+fname <- file.path(data_dir, "jena_climate_2009_2016.csv")
+data <- read_csv(fname)
+
+glimpse(data)
+
+library(ggplot2)
+ggplot(data, aes(x = 1:nrow(data), y = `T (degC)`)) + geom_line()
+
+ggplot(data[1:1440,], aes(x = 1:1440, y = `T (degC)`)) + geom_line()
+
+lookback = 1440 #Observations will go back 10 days.
+steps = 6 #Observations will be sampled at one data point per hour.
+delay = 144 #Targets will be 24 hours in the future.
+
+sequence_generator <- function(start) {
+  value <- start - 1
+  function() {
+    value <<- value + 1
+    value
+  }
+}
+
+gen <- sequence_generator(10)
+gen()
+
+data <- data.matrix(data[,-1])
+
+train_data <- data[1:200000,]
+mean <- apply(train_data, 2, mean)
+std <- apply(train_data, 2, sd)
+data <- scale(data, center = mean, scale = std)
+
+generator <- function(data, lookback, delay, min_index, max_index,
+                      shuffle = FALSE, batch_size = 128, step = 6) {
+  if (is.null(max_index))
+    max_index <- nrow(data) - delay - 1
+  i <- min_index + lookback
+  function() {
+    if (shuffle) {
+      rows <- sample(c((min_index+lookback):max_index), size = batch_size)
+    } else {
+      if (i + batch_size >= max_index)
+        i <<- min_index + lookback
+      rows <- c(i:min(i+batch_size-1, max_index))
+      i <<- i + length(rows)
+    }
+
+    samples <- array(0, dim = c(length(rows),
+                                lookback / step,
+                                dim(data)[[-1]]))
+    targets <- array(0, dim = c(length(rows)))
+                      
+    for (j in 1:length(rows)) {
+      indices <- seq(rows[[j]] - lookback, rows[[j]]-1,
+                     length.out = dim(samples)[[2]])
+      samples[j,,] <- data[indices,]
+      targets[[j]] <- data[rows[[j]] + delay,2]
+    }           
+    list(samples, targets)
+  }
+}
+
+lookback <- 1440
+step <- 6
+delay <- 144
+batch_size <- 128
+
+train_gen <- generator(
+  data,
+  lookback = lookback,
+  delay = delay,
+  min_index = 1,
+  max_index = 200000,
+  shuffle = TRUE,
+  step = step, 
+  batch_size = batch_size
+)
+
+val_gen = generator(
+  data,
+  lookback = lookback,
+  delay = delay,
+  min_index = 200001,
+  max_index = 300000,
+  step = step,
+  batch_size = batch_size
+)
+
+test_gen <- generator(
+  data,
+  lookback = lookback,
+  delay = delay,
+  min_index = 300001,
+  max_index = NULL,
+  step = step,
+  batch_size = batch_size
+)
+
+# How many steps to draw from val_gen in order to see the entire validation set
+val_steps <- (300000 - 200001 - lookback) / batch_size
+
+# How many steps to draw from test_gen in order to see the entire test set
+test_steps <- (nrow(data) - 300001 - lookback) / batch_size
+
+
+#Here’s the evaluation loop.
+
+library(keras)
+evaluate_naive_method <- function() {
+  batch_maes <- c()
+  for (step in 1:val_steps) {
+    c(samples, targets) %<-% val_gen()
+    preds <- samples[,dim(samples)[[2]],2]
+    mae <- mean(abs(preds - targets))
+    batch_maes <- c(batch_maes, mae)
+  }
+  print(mean(batch_maes))
+}
+
+evaluate_naive_method()
+celsius_mae <- 0.29 * std[[2]]
+
+
+model <- keras_model_sequential() %>% 
+  layer_flatten(input_shape = c(lookback / step, dim(data)[-1])) %>% 
+  layer_dense(units = 32, activation = "relu") %>% 
+  layer_dense(units = 1)
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(),
+  loss = "mae"
+)
+
+history <- model %>% fit_generator(
+  train_gen,
+  steps_per_epoch = 500,
+  epochs = 20,
+  validation_data = val_gen,
+  validation_steps = val_steps
+)
+plot(history)
+
+# A first recurrent baseline
+model <- keras_model_sequential() %>% 
+  layer_gru(units = 32, input_shape = list(NULL, dim(data)[[-1]])) %>% 
+  layer_dense(units = 1)
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(),
+  loss = "mae"
+)
+
+history <- model %>% fit_generator(
+  train_gen,
+  steps_per_epoch = 500,
+  epochs = 20,
+  validation_data = val_gen,
+  validation_steps = val_steps
+)
+
+# using recurrent dropout to fight over fitting
+model <- keras_model_sequential() %>% 
+  layer_gru(units = 32, dropout = 0.2, recurrent_dropout = 0.2,
+            input_shape = list(NULL, dim(data)[[-1]])) %>% 
+  layer_dense(units = 1)
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(),
+  loss = "mae"
+)
+
+history <- model %>% fit_generator(
+  train_gen,
+  steps_per_epoch = 500,
+  epochs = 40,
+  validation_data = val_gen,
+  validation_steps = val_steps
+)
+
+# stcking recurrent layers
+model <- keras_model_sequential() %>% 
+  layer_gru(units = 32, 
+            dropout = 0.1, 
+            recurrent_dropout = 0.5,
+            return_sequences = TRUE,
+            input_shape = list(NULL, dim(data)[[-1]])) %>% 
+  layer_gru(units = 64, activation = "relu",
+            dropout = 0.1,
+            recurrent_dropout = 0.5) %>% 
+  layer_dense(units = 1)
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(),
+  loss = "mae"
+)
+
+history <- model %>% fit_generator(
+  train_gen,
+  steps_per_epoch = 500,
+  epochs = 40,
+  validation_data = val_gen,
+  validation_steps = val_steps
+)
+
+# bi directional RNNs
+library(keras)
+
+# Number of words to consider as features
+max_features <- 10000  
+
+# Cuts off texts after this number of words
+maxlen <- 500
+
+imdb <- dataset_imdb(num_words = max_features)
+c(c(x_train, y_train), c(x_test, y_test)) %<-% imdb
+
+# Reverses sequences
+x_train <- lapply(x_train, rev)
+x_test <- lapply(x_test, rev) 
+
+# Pads sequences
+x_train <- pad_sequences(x_train, maxlen = maxlen)  <4>
+x_test <- pad_sequences(x_test, maxlen = maxlen)
+
+model <- keras_model_sequential() %>% 
+  layer_embedding(input_dim = max_features, output_dim = 128) %>% 
+  layer_lstm(units = 32) %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+
+model %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("acc")
+)
+  
+history <- model %>% fit(
+  x_train, y_train,
+  epochs = 10,
+  batch_size = 128,
+  validation_split = 0.2
+)
+
+
+
+model <- keras_model_sequential() %>% 
+  bidirectional(
+    layer_gru(units = 32), input_shape = list(NULL, dim(data)[[-1]])
+  ) %>% 
+  layer_dense(units = 1)
+
+model %>% compile(
+  optimizer = optimizer_rmsprop(),
+  loss = "mae"
+)
+
+history <- model %>% fit_generator(
+  train_gen,
+  steps_per_epoch = 500,
+  epochs = 40,
+  validation_data = val_gen,
+  validation_steps = val_steps
+)
+
+
+```
+
+
+
+
+
+
+# 4.0 Predict & Analyze
+There are four things we are looking for when analyzing residuals:
+* The mean of the errors is zero (and the sum of the errors is zero)
+* The distribution of the errors are normal.
+* All of the errors are independent.
+* Variance of errors is constant (Homoscedastic)
+```{r predict_lm_inc}
+results_inc$LMFIT <- lm_inc$fitted.values
+results_inc$LMRES <- lm_inc$residuals # this is obs-predstr
+  
+layout(matrix(c(1,1,2,3),2,2,byrow=T))
+# response vs. residuals Plot
+results_inc_ordered <- results_inc[order(results_inc$FLOW),]
+plot(results_inc_ordered$LMRES ~ results_inc_ordered$FLOW, main="Unimpaired Flow vs. Residuals\nfor Multiple Linear Regression", xlab="Unimpaired Flow (AF)", ylab="Residuals")
+abline(h=0,lty=2)
+
+# histogram of residuals
+hist(results_inc_ordered$LMRES, main="Histogram of Residuals", ylab="Residuals")
+
+# q-q plot
+qqnorm(results_inc_ordered$LMRES)
+qqline(results_inc_ordered$LMRES)
+
+# residuals are normally distributed? test residuals for normality; null hypothesis: Skewness and Kurtosis are equal to zero
+library(fBasics)
+jarqueberaTest(lm_inc$resid) 
+
+# residuals are independent? dwtest; test for independence of residuals; null hypothesis: Errors are serially uncorrelated
+library(lmtest) 
+dwtest(lm_inc) 
+
+layout(matrix(c(1,2,3,4),2,2,byrow=T))
+plot(lm_inc$fitted, rstudent(lm_inc), main="Multi Fit Studentized Residuals", xlab="Predictions", ylab="Studentized Resid", ylim=c(-2.5,2.5))
+abline(h=0, lty=2)
+plot(results_inc$DATE, lm_inc$residuals, main="Residuals by Time", xlab="Time",ylab="Residuals")
+abline(h=0,lty=2)
+hist(lm_inc$residuals,main="Histogram of Residuals")
+qqnorm(lm_inc$residuals)
+qqline(lm_inc$residuals)
+```
+
+```{r predict_lm_agg}
+results_agg$LMFIT <- lm_agg$fitted.values
+results_agg$LMRES <- lm_agg$residuals
+
+layout(matrix(c(1,1,2,3),2,2,byrow=T))
+# response vs. residuals Plot
+results_agg_ordered <- results_agg[order(results_agg$FLOW),]
+plot(results_agg_ordered$LMRES ~ results_agg_ordered$FLOW, main="Unimpaired Flow vs. Residuals\nfor Multiple Linear Regression", xlab="Unimpaired Flow (AF)", ylab="Residuals")
+abline(h=0,lty=2)
+
+# histogram of residuals
+hist(results_agg_ordered$LMRES, main="Histogram of Residuals", ylab="Residuals")
+
+# q-q plot
+qqnorm(results_agg_ordered$LMRES)
+qqline(results_agg_ordered$LMRES)
+
+# residuals are normally distributed? test residuals for normality; null hypothesis: Skewness and Kurtosis are equal to zero
+library(fBasics)
+jarqueberaTest(lm_agg$resid) 
+
+# residuals are independent? dwtest; test for independence of residuals; null hypothesis: Errors are serially uncorrelated
+library(lmtest) 
+dwtest(lm_agg) 
+
+layout(matrix(c(1,2,3,4),2,2,byrow=T))
+plot(lm_agg$fitted, rstudent(lm_agg), main="Multi Fit Studentized Residuals", xlab="Predictions", ylab="Studentized Resid", ylim=c(-2.5,2.5))
+abline(h=0, lty=2)
+plot(results_agg$DATE, lm_agg$residuals, main="Residuals by Time", xlab="Time",ylab="Residuals")
+abline(h=0,lty=2)
+hist(lm_agg$residuals,main="Histogram of Residuals")
+qqnorm(lm_agg$residuals)
+qqline(lm_agg$residuals)
+```
+
+```{r predict_glm_inc}
+
+```
+
+```{r predict_glm_agg}
+
+```
+
+```{r predict_tf_inc}
+
+```
+
+```{r predict_tf_agg}
+
+```
+
+
+
+

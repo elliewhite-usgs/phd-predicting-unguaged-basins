@@ -1,0 +1,58 @@
+\chapter{Brief History of Statistical Learning} \label{c:history}
+This section explains how some of the ideas organized in Chapter \ref{ch3:guide}'s heuristic guide developed over time. 
+
+In 1763, Thomas Bayes's \textit{An Essay towards solving a Problem in the Doctrine of Chances} is published posthumously. In it, Bayes explained that ``given the number of times in which an unknown event has happened and failed, the chance that the probability of its happening in a single trial lies somewhere between any two degrees of probability that can be named" \cite{mr1763essay}. This work later underpins \textbf{Bayes Theorem}.  
+
+In 1805, Adrien Marie Legendre introduced the least squares method of estimating parameters as an appendix to his book on the paths of comets. Carl Freidrich Gauss also publishes the method a few years later but claimed he had been using it since 1795 \cite{stigler1981gauss}. Regardless of the original inventor, the method is brought to perfection with its application to \textbf{linear regression} and curve fitting. 
+
+In 1812, Pierre-Simon Laplace, expanding on the work of Bayes, introduced methods of finding probabilities of compound events when the probabilities of their simple components are known, and he defined what is now known as \textbf{Bayes' Theorem} \cite{o2000biography}.
+
+In 1913, Andrey Markov founded a new branch of probability theory by applying mathematics to poetry. Later called \textbf{Markov chains}, the method went beyond coin-flipping (where each event is independent of all others) to chains of linked events (where what happens next depends on the current state of the system) \cite{hayes2013first}. 
+
+In 1936, Ronald Fisher introduced a method to find a linear combination of features that separates (or discriminates between) two or more classes of events. Fisher's discriminant is later slightly modified to add the assumptions of normally distributed classes or equal class covariances, and became the more famous \textbf{linear discriminant analysis (LDA)} \cite{hardle2007applied}. 
+
+In the 1958, David Cox developed \textbf{logistic regression} for situations where it is not reasonable to assume that the independent variables are normally distributed as in LDA. 
+
+In 1951, Marvin Minsky and graduate student Dean Edmonds built the first \textbf{neural network machine}. This machine was a randomly connected network of capacitors that have a finite amount of memory and time to keep or remember that memory. The memory holds the probability that a signal will come in one input and another signal will come out of the output. This machine, modeled after the Hebbian theory of learning in the human brain, was one of the first pioneering attempts at artificial intelligence. Shortly after, in 1957, Frank Rosenblatt invents the perceptron, the first \textbf{neural network} for computers. 
+
+In 1967, the Thomas Cover and Peter Hart invent the \textbf{nearest neighbor} algorithm, which kickstarted basic pattern recognition \cite{cover1967nearest}. The algorithm was used to map a route for the \textit{traveling salesmen problem}, starting at a random city but ensuring a visit to all cities during the shortest tour \cite{marr2016short}.
+
+In 1972, Nelder and Wedderburn introduced \textbf{generalized linear models}. Linear models are customarily made of systematic and random error components, with the errors usually assumed to have normal distribution. This work allowed for a unified fitting procedure, despite the type of error distribution, based on likelihood \cite{nelder1972generalized}.
+
+In 1980, Kunihiko Fukushima developed the neocognitron, a type of \textbf{artificial neural network} \cite{fukushima1982neocognitron}. This work later inspired the development of \textbf{convolutional neural networks}.
+
+In 1981, Gerald Dejong introduced \textbf{explanation based learning}, where a computer algorithm analyzes data, creates a general rule it can follow, and discards unimportant data \cite{marr2016short}. The new knowledge structure is not constructed by noticing the similarities and differences among a large number of inputs, nor is it constructed from a more general one already existing within the system. The system is capable of learning from just one example. The knowledge structure can be expanded later but is already a viable new schema capable of adding future processing \cite{dejong1981generalizations}. 
+
+In 1982, John Hopfield developed Hopfield networks, a type of \textbf{recurrent neural network} that can serve as content-addressable memory systems \cite{hopfield1982neural}. Based on aspects of neurobiology, the content-addressable memory can yield an entire memory from any subpart of sufficient size. The recurrent aspect of RNNs make it a breakthrough for processes that are driven by lagged parameters. For example, in hydrology, runoff processes are effected by time-lagged precipitation; depending on the size of the watershed, precipitation at the headwaters may take days to get to the outlet, or, snowfall in the winter will take months to melt and turn into baseflow. In 1997, Sepp Hochreiter and Jorgen Schmidhuber invent \textbf{long short-term memory (LSTM) recurrent neural networks}. This method greatly improved the efficiency of neural networks (i.e., more successful runs, at a higher learning rate) and it solved complex (i.e., artificial long-time-lag) tasks that have never been solved by previous recurrent network algorithms \cite{hochreiter1997long}. 
+
+In 1984, Brieman, Friedman, Olshen, and Stone introduced \textbf{classification and regression trees (CART)} \cite{breiman1993classification}, a method of recursively partitioning the feature space. In 1995, Tin Kam Ho fixes the issue of high variance in the CART with his proposed \textbf{random forest} algorithm \cite{ho1995random}. 
+
+In 1986, Hastie and Tibshirani developed the \textbf{generalized additive model}, a non-parametric extension to the generalized linear models where the linear predictor is replaced by an additive predictor \cite{hastie1990generalized}. This means the model is fit on multiple predictors and the fit on each predictor is updated by holding the others fixed (i.e., fit to a partial residual). 
+
+In 1995, Corinna Cortes and Vladimir Vapnik published their work on \textbf{support vector machines}. Originally applied to only two-group classification problems, this procedure constructs a linear decision surface in high dimensions with corresponding ``support vectors" at a margin, M, from the decision surface. The purpose of the method is to maximize the margin, M \cite{cortes1995support}. 
+
+Until the 1990's, statistical learning was a purely theoretical analysis of the problem of function estimation from a given collection of data \cite{vapnik1999overview}. Since then, with the commercialization of software programs, these methods can be applied to ``real-world" data and therefore used in fields outside of statistics and computer science. Work on these methods has also shifted from knowledge-driven approaches to a data-driven approaches; we are letting the computer analyze large amounts of data and ``learn" from the results. As \shortciteA{winston2010class} puts it, ``the computer is learning much like a bulldozer processing gravel \cite{winston2010class}."
+
+In 2006, Geoffrey Hinton developed \textit{deep learning} techniques that let computers ``see" and distinguish text in images (using the famous MNIST database of hand-written digits). These methods make inference easier in densely connected belief nets that have many hidden layers and scale poorly to increases in the number of parameters \cite{hinton2006fast}. \textbf{Deep convolutional networks} have brought about breakthroughs in processing images, video, speech and audio \cite{marr2016short}. 
+
+In 2010, the Microsoft \textbf{Kinect} was launched. The devise could track 20 human features at a rate of 30 times per second \cite{marr2016short}, allowing people to interact with the computer (or more pointedly, the console) via movements and gestures. Microsoft's vision was to incorporate motion into gaming, eliminating the need for controllers you would have to charge or could accidentally fling into your TV \cite{kinect2018}.
+
+In 2012, \textbf{Google Brain} started. Led by Andrew Ng and Jeff Dean, its deep neural network can learn to discover and categorize objects. Despite the fact that the network had never been told what a cat was, nor was it given even a single image labeled as a cat, it ``discovered" what a cat looked like from unlabeled YouTube images \cite{dean2015using}. 
+
+In 2014, Facebook developed \textbf{DeepFace}, a software algorithm that is able to recognize that two images show the same face (i.e., facial verification). It employs a nine-layer neural net with over 120 million connection weights, and was trained on four million images uploaded by Facebook users \cite{simonite2014software}. This algorithm raised some privacy concerns and their recent Cambridge Analytica scandal didn't help Facebook with the heightened scrutiny either. 
+
+In 2014, Google researchers presented their work on \textbf{Sibyl}. This proprietary platform started off by recommending YouTube videos to users. Now it can predict spam and a user's ad preferences. In general, its goal is to predict how Google users will behave in the future, based on what they did in the past \cite{sibyl2014}.
+
+In 2015, Amazon launched its own machine learning platform, \textbf{SageMaker}. This platform was designed to help developers and data scientists from the data acquisition step to full model deployment \cite{sagemaker2018}. 
+
+In 2015, Microsoft created the \textbf{Distributed Machine Learning Toolkit}, which makes machine learning tasks on big data highly scalable, efficient, and flexible. The toolkit employs a special sampling techniques to create and distribute training data throughout the cluster \cite{microsoft2015dmlt}.
+
+In 2015, over 3,000 AI and Robotics researchers, endorsed by Stephen Hawking, Elon Musk, and Steve Wozniak (among many others), signed an open letter calling for a ban on offensive autonomous weapons beyond meaningful human control. The letter warns us that ``Artificial Intelligence technology has reached a point where the deployment of such systems is--practically if not legally--feasible within years \cite{hawking2015autonomous}."
+
+In August of 2018, artificial intelligence bots beat five human players at the video game Dota 2. OpenAI, an independent research institute cofounded by Elon Musk developed the bots, and used reinforcement learning to train for the match. In contrast to to chess or go, it is especially difficult to train machiness to play videogames, because the action takes place on a much larger board, where not all your opponent's moves are visible, and it requires that players make decisions quickly. 
+
+
+
+
+
+

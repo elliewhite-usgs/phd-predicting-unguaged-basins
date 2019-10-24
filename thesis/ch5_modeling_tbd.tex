@@ -1,0 +1,29 @@
+\chapter{Modeling} \label{ch5:modeling}
+\setlength{\epigraphwidth}{4.5in}
+\epigraph{From where we stand the rain seems random. If we could stand somewhere else, we would see the order in it.}{Tony Hillerman, \textit{``Coyote Waits''}, 2009}
+
+%----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\section*{Summary}
+
+%----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\section{Introduction}
+% add literature review here
+
+Given the guide mentioned above, we can develop the following model types for the PUB problem:
+
+(1) A multi-variate linear regression model: or to be precise a generalized linear regression (GLM) model where the \textit{random component} has a known distribution form. The \textit{systematic component}, or the explanatory variables, are mixed continuous and categorical. The \textit{link} between the random and systematic components is a function describing how the expected value of the response relates to the linear predictor of explanatory variables. In this case, the link is logarithmic, because, we often assume that the probability distribution of unimpaired flow to follow a Log-Pearson Type III, a lognormal distribution. Log-Pearson Type III is a gamma distribution used for continuous, positive, right-skewed data, and where variance is near-constant on the log-scale. We have to account for this non-normality in the residuals, stemming from non-normality in the response variable, when using regression methods. The GLM removes some restrictions and assumptions normal linear models make \cite{stat504analysis}.
+ 
+(2) A recurrent neural network (RNN): a special case of neural networks for sequential data. A traditional neural network assumes that all inputs (and outputs) are independent of each other, so, it uses different parameters in each layer. A RNN shares the same parameters across all connected steps, and performs the same task just on different inputs. This feature greatly reduces the total number of parameters the model needs to learn. In chapters \ref{ch4:loss} and \ref{ch5:resampling}, we will develop a special type of RNN, a long short-term memory (LSTM), which is much better at capturing long-term dependencies. 
+
+(3) A multivariate adaptive regression spline (MARS): a non-parametric regression technique that uses recursive partitioning. In chapters \ref{ch4:loss} and \ref{ch5:resampling}, we will develop a special type of MARS model, a time series MARS (TMARS), where the predictors are lagged time series values resulting in autoregressive spline models.
+
+
+%----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\section{Model Selection From Developed Alternatives}
+Once a set of suitable modeling methods are applied, statistical analysis of the results can hep in choosing the ``best" model. What is meant by best is subjective. In prediction, when the model is an estimator of a physical quantity, the better model more closely predicts the observed data. This highlights the importance of first defining a loss function (See Chapter \ref{ch4:loss}). Also, \textit{Bias} and \textit{variance} are important measures of the estimator's quality.  
+
+In addition, a good model selection will balance simplicity with prediction accuracy. This principle is known as \textit{Occam's Razor}: given models with similar predictive power, the model with the fewest variables (i.e., simpler) is preferable. Along the same lines, we can select a model using the \textit{one-standard-error rule} \cite{friedman2001elements}. Here, various models are compared based on their test set error. We can then select the simplest model within one standard error of the model with the lowest test set error. Therefore, efficiency is considered as well as prediction accuracy. 
+
+
+
+

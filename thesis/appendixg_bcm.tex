@@ -1,0 +1,62 @@
+\chapter{BCM Simulated Hydrology} \label{f:bcmdata}
+
+The data set developed for Chapter \ref{ch5:resampling} is described here. The watersheds in the study are depicted in Figure \ref{fig:map}, and the response and predictor variables in the dataframe are described in Table \ref{table:bcmvariables}.
+
+\begingroup
+	\renewcommand{\arraystretch}{1.2} 
+	\linespread{1.0}
+	\footnotesize 
+	\centering
+	\captionof{table}{Summary of the variables used in the implementation of the Random Forest model.} 
+	\begin{longtable}[h]{p{2cm}p{2.55cm}p{8.04cm}p{2.24cm}}
+%\begin{table*}[h]\renewcommand{\arraystretch}{1.2} 
+%	\linespread{1.0}
+%	\footnotesize
+%	\centering
+%	\caption{Summary of the variables used in the implementation of the Random Forest model.}
+%	\begin{tabular}{p{2cm}p{2.55cm}p{8.04cm}p{2.24cm}} % must add to 16.5
+	\toprule
+	Type & Variable & Description & Source \\
+	\midrule
+	\endhead
+	Response & Runoff & monthly simulated unimpaired flows, in $mm*km^2$ & USGS \cite{flint2014california} \\
+	\midrule
+	Time & Month & categorical: Jan, Feb, ..., Dec & - \\
+	& Ordinal Month & numerical distance till June: Jan:6, Feb:5, ..., Dec:6 & \\
+	& Season & categorical: Fall, Winter, Spring, Summer & \\
+	& Year & numeric & \\
+	\midrule
+	Climate & Temperature, Lag 1, 2 and 3 Months & temperature and lagged monthly temperature, in $^{\circ}$C & PRISM  \cite{edmund2015package} \\
+	& Precipitation, Lag 1, 2 and 3 Months & precipitation and lagged monthly precipitation, in $mm$ &  \\  
+	& Snow & cumulative precipitation of the same water year for temperatures bellow 2 $^{\circ}$C, in $mm$& \\
+	\midrule
+	Hypsometric & Relief Ratio & (max(elev) - min(elev))/ basin length in, $m/m$ & SRTM90 \cite{jarvis2008hole}\\
+	& Mean Elevation & mean basin elevation, in $m$ & \\
+	\midrule
+	Basin Boundaries & Area & basin drainage area, in $m^2$ & NHD2PLUS \cite{mckay2012nhdplus}\\
+	& Shape & basin length/basin width, in $m/m$ &  \\
+	 & Compactness & basin area/(basin perimeter)$^2$, in $m^2/m^2$ &  \\
+	\midrule
+	Soil & \% Clay & percent clay in surface layer, in $\%$ & POLARIS \cite{chaney2016polaris} \\
+	 & \% Silt & percent silt in surface layer, in $\%$ &  \\
+	 & \% Sand & percent sand in surface layer, in $\%$ &  \\
+	 & Sat. Hydraulic Conductivity & hydrologic conductivity of surface layer, in $cm$/$hr$ &  \\
+	 & Lambda & pore size distribution index (brooks-corey) & \\
+	 & N & measure of the pore size distribution (van genuchten) & \\
+	 & Available water content &, in $m^3/m^3$ & \\ 
+	\midrule
+	Land Cover & Vegetated & Percent of area in the basin vegetated in $\%$ & CALVEG \cite{calveg2004vegetation} \\
+	\midrule
+	Ground Water & Dominant Geology & dominant rock type in basin, categorical & NRCS \cite{nrcs2006land} \\
+	& Depth to Restricted Layer & in $cm$ & POLARIS \cite{chaney2016polaris}\\
+%	\hline 
+%	\end{tabular}
+%	\label{table:ufvariables}
+%\end{table*}
+	\bottomrule
+	\end{longtable}
+	\label{table:bcmvariables}
+\endgroup
+
+\subsection*{Summary Stats}
+TO BE COMPLETED

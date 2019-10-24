@@ -1,0 +1,3 @@
+This research is to develop statistical models, generally simpler than mechanistic models, that use statistical learning techniques to predict the unimpaired flows of California basins from available data. 
+
+These models are simply made with the data. I start with very simple models and later develop more complex machine learning and deep learning models. No testing or validation is done here (for that, see pub-resampling). 

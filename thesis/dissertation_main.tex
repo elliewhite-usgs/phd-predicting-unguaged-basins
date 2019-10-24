@@ -1,0 +1,237 @@
+\documentclass[12pt, double, PhD, draftcls]{ucdavisthesis}
+
+% PLEASE READ THE MANUAL - ucdavisthesis.pdf (in the package installation directory) in the UC Davis/Templates and Logos/Latex Templates directory 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                                                                                                                                                                                %
+%                            LATEX COMMANDS FOR DOCUMENT SETUP                                                                                                                                    %
+%                                                                                                                                                                                                                                %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%\usepackage{bookmark}
+\usepackage{epigraph} % for the quotes at the beginning of the chapters
+\usepackage[us,nodayofweek,12hr]{datetime}
+\usepackage{graphicx} % remember that trim={<left> <lower> <right> <upper>}
+%\usepackage[square,comma,numbers,sort&compress]{natbib} % don't use this, use the next line, this one makes the references all funky
+\usepackage{caption} % for the graphs
+\usepackage{subcaption} % for the 2 in one graphs
+%\usepackage[colorlinks,allcolors=blue]{hyperref} % for links on the in text references, turned this off because apacite doesn't like it!
+\usepackage{pgffor} % for the for loop in appendix 
+% \usepackage{afterpage} % for the plots in appendix, have to clearpage but with this you can clearpage without the page break
+\usepackage[margin=1in]{geometry} % to make the margins 1"
+\usepackage{longtable} % for the table in appendix C that runs into another page
+\usepackage{threeparttable, tablefootnote} % to put footnotes in table environments
+\usepackage{float} % for the appendix plots
+%\usepackage{subfig}
+\usepackage{afterpage} % for the wiiiiiiiiide flowchart
+\usepackage{float} %\renewcommand{\thesection}{\Roman{section}} % for the appendix plots
+\usepackage{tabularx}
+%\usepackage{threeparttable, tablefootnote} % to put footnotes in table environments
+\usepackage[colorlinks = true, urlcolor = blue, linkcolor = black, citecolor = black]{hyperref}
+\usepackage{verbatim}
+\usepackage{booktabs}
+\usepackage{fancyvrb}
+\usepackage{enumerate} % for enumeration 
+\usepackage{enumitem} % for enumeration or itemization
+\usepackage{indentfirst}
+\usepackage{pdflscape}
+
+\usepackage{subcaption} % for the 2 in one graphs
+\usepackage{booktabs,caption,fixltx2e} % table
+%\usepackage[flushleft]{threeparttable}
+\usepackage{footnote} % footnote for tables
+\usepackage{adjustbox} % adjusting tables to fit the page
+\usepackage{array} % tables of a fixed width
+\usepackage{tabu} % tables of a fixed width
+
+\usepackage{chngcntr} % these two are for figure, table, and equation numbers to be by chapter but not section and not all continuous.
+\counterwithin{figure}{chapter}
+\counterwithin{equation}{chapter}
+\counterwithin{table}{chapter}
+
+%\usepackage{natbib}
+\usepackage{apacite} 
+%\bibliographystyle{IEEEtranN}
+%\bibliographystyle{apa}
+%\addbibresource{Desal2.bib} %Imports bibliography file
+\usepackage{url}
+\def\UrlBreaks{\do\/\do-\do_} % to break up urls in references
+\usepackage{multicol}
+\usepackage{xfrac}
+\usepackage{nicefrac}
+\usepackage{bbm}
+\usepackage{siunitx} % for typesetting units
+\providecommand{\keywords}[1]{\textbf{\textit{Keywords}} #1}
+
+\hyphenation{dis-ser-ta-tion blue-print man-u-script pre-par-ing} %add hyphenation rules for words TeX doesn't know
+%\usepackage{setspace} %was causing latex to break
+
+%% for the plots on the next page to be put in the top of an empty page, not floating in the middle 
+%\makeatletter
+%\setlength{\@fptop}{0pt}
+%\makeatother
+
+%\usepackage{hypernat}
+% Other useful packages to try
+\usepackage{amsfonts} % special mathematical fonts
+\usepackage[fleqn]{amsmath}
+\usepackage{commath} % for absolute value symbol
+%\usepackage{amssymb}
+%
+% Different fonts to try (uncomment only fontenc and one font at a time)
+% (you may need to install these first)
+%\usepackage[T1]{fontenc} %enable fontenc package if using one of the fonts below
+%\usepackage[adobe-utopia]{mathdesign}
+%\usepackage{tgschola}
+%\usepackage{tgbonum}
+%\usepackage{tgpagella}
+%\usepackage{tgtermes}
+%\usepackage{fourier}
+%\usepackage{fouriernc}
+%\usepackage{kmath,kerkis}
+%\usepackage{kpfonts}
+%\usepackage[urw-garamond]{mathdesign}
+%\usepackage[bitstream-charter]{mathdesign}
+%\usepackage[sc]{mathpazo}
+%\usepackage{mathptmx}
+%\usepackage[varg]{txfonts}
+
+%\renewcommand{\rightmark}{\scriptsize A University of California Davis\ldots \hfill Rev.~\#1.0 \quad Compiled: \currenttime, \today}
+% a fancier running header that can be used with draftcls options
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                                                                                                                                                                                %
+%                          DOCUMENT SETUP AND INFORMATION FOR PRELIMINARY PAGES                                                                                                     %
+%                                                                                                                                                                                                                                %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\title                   {Machine Learning in Predicting Ungauged Basin Flows}
+%Exact title of your thesis. Indicate italics where necessary by underlining or using italics. Please capitalize the first letter of each word that would normally be capitalized in a title.
+
+\author              {Elaheh White}
+%Your full name as it appears on University records. Do not use initials.
+
+\authordegrees  {B.S. University of Kentucky 2015 \\
+				M.S. University of California, Davis 2017}
+%Indicate your previous degrees conferred.
+
+\officialmajor      {Civil and Environmental Engineering}
+%This is your official major as it appears on your University records.
+
+\graduateprogram{Civil and Environmental Engineering}
+%This is your official graduate program name. Used for UMI abstract.
+
+\degreeyear       {2020}
+% Indicate the year in which your degree will be officially conferred.
+
+\degreemonth    {September}
+% Indicate the month in which your degree will be officially conferred. Used for UMI abstract.
+
+\committee        {Jay R. Lund}{Robert J. Hijmans}{Jonathan D. Herman}{}{}
+% These are your committee members. The command accepts up to five committee members so be sure to have five sets of braces, even if there are empties.
+
+% --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%\copyrightyear{2020}
+\nocopyright
+
+% --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\dedication{\textsl{To Jim White,\ldots \\
+           I hope you were right, and that we meet again.}}
+
+% --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\abstract{
+All science is the search for unity in hidden likeness \cite{bronowski1988nature}. There are two reasons to approximate the processes that produces such hidden likeness: (1) \textit{prediction} for interpolation or extrapolation to unknown (often future) situations; and (2) \textit{inference} to understand how variables are connected or how change in one affects others. Statistical learning tools aid both prediction and inference. In recent years, rapidly growing computing power, the advent of machine learning algorithms, and user-friendly programming languages (e.g., R and Python) allow for the application of statistical learning methods to broader societal problems. 
+
+This dissertation developed statistical learning models, generally simpler than mechanistic models, to predict the unimpaired flows of California basins from available data. Unimpaired flow is the flow produced by the basin in its current state, but, without dams and diversions \cite{cadwruf2016}. The models predict these type of flows for ungauged basins, an International Association of Hydrological Sciences ``grand challenge" in hydrology. In Predicting Ungauged Basin (PUB) flows, the models learn from the information available at gauged points on a river and extrapolate to points that are ungauged. 
+
+Multiple issues arise when solving this prediction problem: (1) the way we view hydrology, and what we define as a observational unit, determines how data gets fed into statistical learning methods. Therefore, one issue is in deciding the organizational form of the data (i.e., aggregate vs. incremental basins). This concept of data transformation or pre-processing strategies are explored in chapter two; (2) often, in water resources, we are not concerned with accurately predicting the expectation (or the mean) of a distribution; instead, we care to accurately predict the extreme values of the distribution (i.e., floods and droughts). This problem can be tackled with defining asymmetric loss functions presented in chapter three; (3) hydrologic data is structured, meaning there are dependencies and correlation structures inherent in the data (temporal and spatial autocorrelation exist) and rivers forming a network that flow into one another (hierarchical autocorrelation exists). These characteristics require a careful construction of resampling techniques for model error estimation, which are discussed in chapter four; (4) non-stationarity due to climate change requires adjustments to statistical models, especially, if they are meant to aid long-term decision-making. Chapter five develops models from datasets representing future hydrology. 
+
+These issues make PUB a non-trivial problem for statistical learning methods that operate with no a priori knowledge of the system. In juxtaposition with physical or semi-physical models, statistical learning models learn from the data itself, with no assumptions on the underlying process. Their advantages lie in their fast and easy development, simplicity of use, lesser data requirements, good performance, and flexibility in model structure and parameter specifications. In the past two decades, more sophisticated statistical learning models have been applied to rainfall-runoff modeling.
+
+This dissertation starts with an introduction to the PUB problem, along with a literature review, and a heuristic guide for model selection (chapter one), and ends with a sociological examination of the implications of big data, statistical learning, and artificial intelligence in the larger context of our society and political economy (chapter six). It is intended to provide insights in using statistical learning techniques to civil engineers. Since, with these techniques, we now have the potential to get to wrong answers faster, we should take care in each step of model selection, development, and prediction error estimation.
+\newline
+\newline
+\textit{Keywords:} \textup{predicting ungauged basins (PUB); rainfall-runoff modeling; asymmetric loss functions; structured data; blocking resampling methods;  climate change; McDonaldization; water resources; hydrology; statistical learning.}
+}
+
+% --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\acknowledgments{
+UPDATE THIS WHEN STUDY IS DONE!!!!
+% This Dissertation owes its completion to committee members Jay R. Lund, Jon D. Herman, Robert J. Hijmans. Special thanks to Duncan Temple-Lang, Director of the Data Science Initiative, for his guidance and advice on modeling with an incremental basin approach. Special thanks to the Stat Consulting Lab, and Dr. Neil Willits for his guidance on modeling with a generalized linear model. Special thanks to the Data Science Initiative for their programming workshops. 
+
+%Carole Hom, for her help without which I would not have attained NSF funding.
+%Garham Fogg, for being a wonderful mentor from the very beginning of my graduate career. 
+%Marielle Pinheiro, for holding my hand while programming which I desperately needed.
+%Emily Frankel, for encouraging me to work when times were extremely hard, and for being a free therapist when I needed it. 
+%Caroline McKusick, Duane Wright, BB Buchanan, and Toby Smith for enriching my life outside of academia through organizing against injustice. 
+%Nadya Alexander-Sanchez, for being a mentor and offering advice at very key moments, without which I would have left the PhD.
+%
+%Brad White, significant other, for helping me through all the struggles.  
+% no women to cite here!!! and citing Marvin Fucking Minskey
+
+All data processing and model development for this study was done in {\tt R version 3.5.2 (2018-12-20)}, a statistical programming language, \cite{Rlanguage} on platform: x86\_64-w64-mingw32/x64 (64-bit), running under: Windows $>=$ 8 x64 (build 9200). Programs were written in {\tt RStudio}, an integrated development environment, \cite{RStudio}, and used the following packages: {\tt statmod} \cite{statmod} {\tt sp} \cite{sp1, sp2}, {\tt raster} \cite{raster}, {\tt rgeos} \cite{rgeos}, {\tt rgdal} \cite{rgdal}, {\tt dismo} \cite{dismo}, {\tt geojsonio} \cite{geojsonio}, {\tt hydroGOF} \cite{hydroGOF},  {\tt RColorBrewer} \cite{RColorBrewer}, {\tt fBasics} \cite{fBasics}, {\tt lmtest} \cite{lmtest}, and {\tt reshape2} \cite{reshape2}.
+
+The code used for analysis is provided in a repository at: \\
+https://github.com/whiteellie/predicting-ungauged-basins. 
+
+This material is based upon work partly supported by the NSF GRFP under Grant No. 1650042 and the Climate Change, Water, and Society NSF IGERT, to UC Davis DGE No. 1069333. Any opinion, findings, and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the views of the National Science Foundation.
+}
+
+% --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\begin{document}
+
+\makeintropages
+
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%	ARTICLE CONTENTS
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\include{ch0_acronyms}
+\include{ch1_introduction}
+\include{ch2_transformations}
+\include{ch3_lossfunctions}
+\include{ch4_resampling}
+\include{ch5_climatechange}
+%\include{ch6_sociology}
+
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%	APPENDICES
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% use this to get rid of listing appendix figures and tables
+\let\svaddcontentsline\addcontentsline
+\renewcommand\addcontentsline[3]{%
+  \ifthenelse{\equal{#1}{lof}}{}%
+  {\ifthenelse{\equal{#1}{lot}}{}{\svaddcontentsline{#1}{#2}{#3}}}}
+
+\appendix
+\input{appendixa_data} 
+\input{appendixb_terms}
+\input{appendixc_mlhistory}
+\input{appendixd_mof}
+
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%	REFERENCE LIST
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\pagebreak
+\bibliographystyle{apacite}
+%\begingroup
+%    \setlength\bibitemsep{10pt}
+%    %\setstretch{1}
+  	\bibliography{dissertation}
+%\endgroup
+
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+%	UMI ABSTRACT
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+% The UMI abstract uses square brackets!
+\UMIabstract[COPY PASTE FROM ABOVE WHEN DONE!!!]
+
+%------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+\end{document} 
+
+
+
+
+
+
+
+

@@ -1,0 +1,217 @@
+\chapter{Model Measures of Fit} \label{d:mof}
+
+Typical model measures-of-fit(MOF) developed in hydrologic modeling is listed in Table \ref{table:mof} and explained here.  
+
+\begingroup
+	\renewcommand{\arraystretch}{1.2} 
+	\linespread{1.0}
+	\footnotesize 
+	\centering
+	\captionof{table}{Summary of the variables used in the implementation of loss functions.} 
+	\newcolumntype{R}{>{\raggedleft\arraybackslash}}
+	\begin{longtable}[h]{p{1.25cm}p{4.45cm}p{5cm}Rp{1.55cm}Rp{2.25cm}}
+%\begin{table*}[h]\renewcommand{\arraystretch}{1.2} 
+%	\linespread{1.0}
+%	\footnotesize
+%	\centering
+%	\caption{Summary of the variables used in the implementation of the Random Forest model.}
+%	\begin{tabular}{p{2cm}p{2.55cm}p{8.04cm}p{2.24cm}} % must add to 16.5
+	\toprule
+	MOF & Name & Type & Ideal Value & Range \\
+	\midrule
+	\endhead
+	MAE & Mean Absolute Error & absolute measure & 0 & $[0 , \infty)$ \\
+	MSE & Mean Squared Error & absolute measure & 0 & $[0 , \infty)$ \\
+	RMSE & Root Mean Squared Error & absolute measure & 0 & $[0 , \infty)$ \\
+	nRMSE & Normalized RMSE & absolute measure & 0 & $[0 , \infty)$ \\
+	RSR & RMSE standard deviation ratio & absolute measure & 0 & $[0 , \infty)$ \\
+	\midrule
+	RSD & Relative Standard Deviation & supporting measure & 1 & $(-\infty , \infty)$ \\
+	RMU & Relative Mean & supporting measure & 1 & $(-\infty , \infty)$ \\
+	PBIAS & Percent Bias & supporting measure & 0 & $(-100\% , 100\%)$ \\
+	\midrule
+	$R^2$ & Coefficient of Determination & measure of linearity in simulated vs. predicted & 1 & $[0 , 1]$ \\
+	$bR^2$ & Weighted $R^2$ & bias corrected $R^2$ & 1 & $[0 , 1]$ \\
+	NSE & Nash-Sutcliffe Efficiency & square difference measure of fit & 1 & $(-\infty , 1]$ \\
+	d & Index of Agreement & square difference measure of fit & 1 & $[0 , 1]$ \\
+	\midrule
+	mNSE & Modified NSE & sensitivity to peaks can be modified & 1 & $(-\infty , 1]$ \\
+	md & Modified d & sensitivity to peaks can be modified & 1 & $[0 , 1]$ \\
+	rNSE & Relative NSE & sensitivity to peaks eliminated & 1 & $(-\infty , 1]$ \\
+	rd & Relative d & sensitivity to peaks eliminated & 1 & $[0 , 1]$ \\
+	\midrule
+	KGE & Kling-Gupta Efficiency & relative importance of error component made explicit & 1 & $(-\infty , 1]$ \\
+	VE & Volumetric Efficiency & volumes made important no matter if it is in a peak or recession & 1 & $(-\infty , 1]$ \\
+%	\end{tabular}
+%	\label{table:ufvariables}
+%\end{table*}
+	\bottomrule
+	\end{longtable}
+	\label{table:mof}
+\endgroup
+
+See Equations \ref{eq:mae} to \ref{eq:pbias} where $Y^{obs}_i$ are the observed unimpaired flows, and $Y^{sim}_i$ are the predicted or simulated unimpaired flows, and $n$ is the number of observations.
+
+\begin{equation} 
+	\label{eq:mae}
+	MAE =\ \frac{\sum^n_{i=1}\abs{Y^{sim}_i - Y^{obs}_i}}{n} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:mse}
+	MSE =\ \frac{\sum^n_{i=1}{{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }}{n} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:rmse}
+	RMSE =\ \sqrt{\frac{\sum^n_{i=1}{{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }}{n}} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:nrmse}
+	nRMSE =\ \frac{RMSE}{{MU}_{obs}}=\ \frac{\sqrt{\sum^n_{i=1}{{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }}}{\overline{Y^{obs}}} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:rsr}
+	RSR =\ \frac{RMSE}{\sigma_{obs}}=\ \cfrac{\sqrt{\sum^n_{i=1}{{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }}}{\sqrt{\sum^n_{i=1}{{\left(Y^{obs}_i-\overline{Y^{obs}}\right)}^2\ }}} \\
+\end{equation}
+
+The MAE, MSE, RMSE, nRMSE, RSR, are absolute measures of error. 
+
+\begin{equation} 
+	\label{eq:rsd}
+	RSD =\ \frac{\sigma_{sim}}{\sigma_{obs}}=\ \frac{\sqrt{\sum^n_{i=1}{{\left(Y^{sim}_i-\overline{Y^{sim}}\right)^2}}}}{\sqrt{\sum^n_{i=1}{\left(Y^{obs}_i-\overline{Y^{obs}}\right)}^2\ }} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:rmu}
+	RMU =\ \frac{\overline{Y^{sim}}}{\overline{Y^{obs}_i}}=\ \frac{\sum^n_{i=1}{Y^{sim}}}{\sum^n_{i=1}{Y^{obs}}} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:pbias}
+	PBIAS =\ \frac{\sum^n_{i=1}{\left(Y^{obs}_i-Y^{sim}_i\right)*100}}{n \sum^n_{i=1}{(Y^{obs}_i)}} \\
+\end{equation}
+
+The RSD, RMU, and PBIAS are additional supporting measures of error.
+
+\begin{equation} 
+	\label{eq:r2}
+	%R^{2} =\ \frac{\sum^n_{i=1}{{\left(Y^{sim}_i-\overline{Y^{obs}_i}\right)}^2\ }}{\sum^n_{i=1}{{\left(Y^{obs}_i-\overline{Y^{obs}_i}\right)}^2\ }} \\
+	R^{2} = \ \left(\frac{\sum^n_{i=1}{\left(Y^{obs}_i-\overline{Y^{obs}}\right)\left(Y^{sim}_i-\overline{Y^{sim}}\right)}}{\sqrt{\sum^n_{i=1}{\left(Y^{obs}_i-\overline{Y^{obs}}\right)^2}}\sqrt{\sum^n_{i=1}{\left(Y^{sim}_i-\overline{Y^{sim}}\right)^2}}}\right)^2 \\
+\end{equation}
+
+$R^2$ is insensitive to additive and proportional difference between model simulation and observations. One can simply show that for a non zero value of $\beta_0$ and $\beta_1$, if the predictions follow a linear form, $Y^{sim}=\beta_0 + \beta_1 Y^{obs}$, the $R^2$ equals one \cite{legates1999evaluating}. Therefore, for a proper model assessment, it is recommended that the slope of the predicted vs. observed graph be reported or systematically included as in Equation \ref{eq:br2}. 
+
+\begin{equation} 
+	\label{eq:br2}   
+	bR^{2} = 
+	\begin{cases}
+		\text{$\abs{b}R^2$} & \quad\text{for b}\le1\\
+		\text{$\abs{b}^{-1}R^2$} &\quad\text{for b}>1 \\
+	\end{cases}
+\end{equation}
+
+By weighting $R^2$ under or over predictions are quantified together with the dynamics which results in a more comprehensive reflection of model results.
+
+\begin{equation} 
+	\label{eq:nse}
+	NSE =\ 1-\frac{\sum^n_{i=1}{{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }}{\sum^n_{i=1}{{\left(Y^{obs}_i-\overline{Y^{obs}}\right)}^2\ }} \\
+\end{equation}
+
+A Nash-Sutcliffe efficiency factor of lower than zero indicates that the mean value of the observed time series would have been a better predictor than the model. The largest disadvantage of the Nash-Sutcliffe efficiency factor is the fact that the differences between the observed and predicted values are calculated as squared values. As a result, larger values in a time series are strongly overestimated whereas lower values are neglected \cite{legates1999evaluating}. For the quantification of runoff predictions this leads to an overestimation of the model performance during peak flows and an underestimation during low flow conditions \cite{krause2005comparison}.
+
+To reduce the problem of the squared differences and the resulting sensitivity to extreme values the Nash-Sutcliffe efficiency factor is often calculated with logarithmic values of $Y^{sim}_i$ and $Y^{obs}_i$. Through the logarithmic transformation of the runoff values the peaks are flattened and the low flows are kept more or less at the same level. As a result the influence of the low flow values is increased in comparison to the flood peaks resulting in an increase in sensitivity of $ln(NSE)$ to systematic model over or under prediction \cite{krause2005comparison}.
+
+\begin{equation} 
+	\label{eq:d}
+	d =\ 1-\frac{\sum^n_{i=1}{\left(Y^{sim}_i-Y^{obs}_i\right)}^2\ }{\sum^n_{i=1}{\left(\abs{Y^{sim}_i-\overline{Y^{obs}}}+\abs{Y^{obs}_i-\overline{Y^{obs}}}\right)}^2\ } \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:mnse}
+	mNSE =\ 1-\frac{\sum^n_{i=1}{{\abs{Y^{sim}_i-Y^{obs}_i}}^j\ }}{\sum^n_{i=1}{\abs{Y^{obs}_i-\overline{Y^{obs}}}}^j}, \quad j \in \mathbb{N} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:md}
+	md =\ 1-\frac{\sum^n_{i=1}{\abs{Y^{sim}_i-Y^{obs}_i}}^j\ }{\sum^n_{i=1}{\left(\abs{Y^{sim}_i-\overline{Y^{obs}}}+\abs{Y^{obs}_i-\overline{Y^{obs}}}\right)}^j}, \quad j \in \mathbb{N} \\
+\end{equation}
+
+For j=1, the overestimation of the flood peaks in regular NSE is reduced significantly resulting in a better overall evaluation. j=3 is best for flood modeling. 
+
+%\begin{equation} 
+%	\label{eq:re}
+%	RE = 2 * \frac{Y^{sim}_i - Y^{obs}_i}{Y^{sim}_i + Y^{obs}_i} \\
+%\end{equation}
+
+\begin{equation} 
+	\label{eq:rnse}
+	rNSE =\ 1-\dfrac
+	{\sum^n_{i=1}{\left( \dfrac
+		{Y^{sim}_i-Y^{obs}_i}
+		{Y^{obs}_i} \right)^2}
+	}
+	{\sum^n_{i=1}{\left(\dfrac
+		{Y^{obs}_i-\overline{Y^{obs}}}
+		{\overline{Y^{obs}}} \right)^2}
+	} \\
+\end{equation}
+
+\begin{equation} 
+	\label{eq:rd}
+	rd = \ 1-\dfrac
+	{\sum^n_{i=1}{\left( \dfrac
+		{Y^{sim}_i-Y^{obs}_i} 
+		{Y^{obs}_i}\right)^2}
+	}
+	{\sum^n_{i=1}{\left(\dfrac
+		{\abs{Y^{sim}_i-\overline{Y^{obs}}}+\abs{Y^{obs}_i-\overline{Y^{obs}}}}
+		{\overline{Y^{obs}_i}} \right)^2}
+	} \\
+\end{equation}
+
+As a result, an over or under prediction of higher values (i.e., peaks) has, in general, a greater influence than those of lower values. Therefore, we can use relative values in the regular NSE equations. These equations will not be sensitive to peaks at all. 
+
+\begin{equation} 
+	\label{eq:kge}
+	\begin{aligned}
+		& KGE = \ 1-\sqrt{(r-1)^2+(\beta -1)^2+(\gamma -1)^2},\\ 
+		& r= Pearson's\ r, \\
+		& \beta=\frac{\overline{Y^{sim}}}{\overline{Y^{obs}}}, \\
+		& \gamma=\dfrac{C_v^{sim}}{C_v^{obs}}= \dfrac{\dfrac{\sigma_{sim}}{\overline{Y^{sim}}}}{\dfrac{\sigma_{obs}}{\overline{Y^{obs}}}} \\
+	\end{aligned}
+\end{equation}
+
+The Kling Gupta Efficiency (KGE) factor facilitates the analysis of the relative importance of its different components: $r$, correlation and timing; $\beta$: magnitude and bias; and $\gamma$: variability).
+
+\begin{equation} 
+	\label{eq:ve}
+	VE =\ 1-\dfrac{\sum^n_{i=1}{\abs{Y^{sim}_i-Y^{obs}_i}}}{\sum^n_{i=1}{(Y^{obs}_i)}} \\
+\end{equation}
+
+To solve the problems presented with reporting bias in hydrologic models, the Volumetric Efficiency (VE) can be used. It is easy to calculate, and of treats every unit volume of water the same as any other unit volume, whether it be delivered during slow recession or during peak flow \cite{criss2008nash}.
+
+In conclusion, the optimal benchmark will differ for different applications, which is why so many benchmarks have been proposed in hydrology. It is especially critical when the model measure of fit it to be used as a loss function in a machine learning algorithm. These discretionary choices tend to disappear when complex modeling is concerned. Therefore, the criteria for decisions should be made explicit and known before modeling begins. 
+
+\citeA{Moriasi2007885} provides a table of gneral performance ratings for recommended statistics for a monthly time step, useful for the modeling done in this dissertation \ref{table:moriasimof}. 
+
+
+\begin{table*}[h]\renewcommand{\arraystretch}{1.2} 
+	\linespread{1.0}
+	\centering
+	\caption{General performance ratings for recommended statistics for a monthly time step. Reprinted from  \protect\citeNP{Moriasi2007885}.}
+	\begin{tabular}{p{7cm}p{2.5cm}p{2.5cm}p{2.5cm}} % must add to 16.5
+		Performance Rating & RSR & NSE & PBIAS \\
+		\hline
+		Very good & $[0.0 , 0.5]$ & $(0.75 , 1.00]$ & $(-\infty , \pm10)$\\
+		Good & $(0.5 , 0.6]$ & $(0.65 , 0.75]$ & $[\pm10 , \pm15)$\\
+		Satisfactory & $(0.6 , 0.7]$ & $(0.50 , 0.65]$ & $[\pm15 , \pm25)$\\
+		Unsatisfactory & $(0.7 , \infty)$ & $(-\infty , 0.50]$ & $[\pm25 , \infty)$ \\
+		\hline
+	\end{tabular}
+	\label{table:moriasimof}
+\end{table*}
+
+

@@ -1,0 +1,3102 @@
+---
+title: "transformations"
+author: "Ellie White"
+date: "March 23, 2019"
+output: html_document
+---
+
+Record of how a model's predictive capapility is different given different data transformation techniques.  
+
+# Contents   
+1.0 Data Gathering  
+2.0 Data Transformations  
+  2.1 Aggregate vs. Incremental Basins  
+  2.2 Cumulative vs. Non-Cumulative  
+  2.3 Log Transforming, Linear Modeling, Back-Transforming (NA)  
+  2.4 Whitening (NA)  
+3.0 Modelling and Resampling  
+  3.1 Resubstitution  
+  3.2 Random K-fold  
+  3.3 Leave One Group Out  
+  3.4 Random K-fold Leave Multiple Groups Out  
+  3.5 Hierarchical Leave Multiple Groups Out  
+4.0 LOGO Post Processing  
+  4.1 Aggregate Basins
+  4.2 Incremental Basins  
+  4.3 Cumulative Basins 
+5.0 Test and Analyze
+6.0 Visual Fit  
+7.0 Goodness of Fit   
+
+```{r, include=FALSE}
+library(knitr)
+library(formatR)
+opts_chunk$set(fig.width = 7.5, fig.height = 7.5, collapse = TRUE, tidy = FALSE)
+```
+
+# Citations
+```{r citations}
+# cite R 
+toBibtex(citation())
+
+# cite R studio
+RStudio.Version()
+
+# cite packages
+citethese <- c("raster", "sp", "rgdal", "rgeos", "dismo", "geojsonio", "hydroGOF", "RColorBrewer", "fBasics", "lmtest", "prism", "reshape2", "statmod")
+for(c in seq_along(citethese)){
+  print(toBibtex(citation(citethese[c])))
+}
+remove(c)
+
+# session info in case anything goes wrong
+sessionInfo()
+```
+
+# Set Seed
+```{r setseed}
+set.seed(3232019)
+```
+
+# 1.0 Data Gathering
+```{r data_gathering} 
+df <- readRDS('inputdata/moddf.rds')
+dfc <- readRDS('inputdata/moddfc.rds')
+
+# remove DOMGEOLOGY cause it's causing problems
+df <- df[ , !(colnames(df) %in% c("DOMGEOLOGY"))]
+dfc <- dfc[ , !(colnames(dfc) %in% c("DOMGEOLOGY"))]
+
+# order by baisn name
+df <- df[order(df$CDEC_ID), ]
+row.names(df) <- 1:nrow(df)
+dfc <- dfc[order(dfc$CDEC_ID), ]
+row.names(dfc) <- 1:nrow(dfc)
+
+# check this
+dim(df) == dim(dfc)
+
+# get rid of negative flows
+# 1st of all WHY THE FUCK ARE THERE NEGATIVE FLOWS IN THE DATA? inverstigate this later.
+# 2nd make sure the dates that have negative flows in the original dataset is removed from the cumulative dataset too. Afterall, these cumulative values are calculated from the original dataset and negative flow don't make sense there, so their cumulative doesn't make sense in this dataset either. 
+moddf <- df[df$FLOW>=0 & dfc$FLOW>=0, ]
+moddfc <- dfc[df$FLOW>=0 & dfc$FLOW>=0 , ]
+
+# check if all the negatives are gone from moddf and moddfc
+tbd <- moddf[moddf$FLOW<0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+tbd <- moddfc[moddfc$FLOW<0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+remove(tbd)
+
+# check this
+dim(moddf) == dim(moddfc)
+```
+
+```{r data_gathering_extra}
+# some helpful dataframes, may come in handy later for post processing
+basins_points <- read.csv("inputdata/cdec_fnf_stations_data_minus_sfj_otr_bhn_ftm_sfr_sjm_klo.csv", stringsAsFactors = FALSE)
+coordinates(basins_points) <- ~LONGITUDE+LATITUDE
+proj4string(basins_points) <- CRS("+proj=longlat +datum=WGS84")
+
+basins <- readRDS("inputdata/basins.rds")
+cacounties <- readRDS("inputdata/counties.rds")
+
+ta <- CRS("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=km +ellps=GRS80")
+basins_points <- spTransform(basins_points, ta)
+basins <- spTransform(basins, ta)
+cacounties <- spTransform(cacounties, ta)
+  
+# wide format data
+cdec_fnf_wide <- read.csv('inputdata/cdec_fnf_wide.csv')
+cdec_fnf_wide$DATE <- as.Date(cdec_fnf_wide$DATE, format="%Y-%m-%d")
+cdec_fnf_wide <- cdec_fnf_wide[order(cdec_fnf_wide$DATE),]
+
+# The full records span 1900-01-01 to 1980-09-01, but most records start at 1982
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>="1982-01-01", ]
+```
+
+```{r visuals}
+# colourblind palettes
+# ordered:     black      pink        orange     yellow     green       blue      darkorange  lightblue
+cbpgrey <-  c("#999999", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+cbpblack <- c("#000000", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+```
+
+# 2.0 Data Tranformations
+```{r data_transformation_lm}
+# for LM
+# split into two one original aggregate basins and one the incremental basins
+df_lm_agg <- moddf[1:(which(moddf$CDEC_ID=="AMA_INC")[1]-1),]
+df_lm_inc <- moddf[which(moddf$CDEC_ID=="AMA_INC")[1]:nrow(moddf),]
+df_lm_cagg <- moddfc[1:(which(moddfc$CDEC_ID=="AMA_INC")[1]-1),]
+df_lm_cinc <- moddfc[which(moddfc$CDEC_ID=="AMA_INC")[1]:nrow(moddfc),]
+
+# get rid of na values 
+df_lm_agg <- na.omit(df_lm_agg)
+df_lm_inc <- na.omit(df_lm_inc)
+df_lm_cagg <- na.omit(df_lm_cagg)
+df_lm_cinc <- na.omit(df_lm_cinc)
+```
+
+```{r data_transformations_glm}
+# for GLM
+# make another data frame without the 0s, because a gamma distributions in glms can't handle zeros
+# We are going to add a small amount to the 0s, in essence it is the same in value but now the glm trasformations work
+df[which(df$FLOW==0), "FLOW"] <- 1
+dfc[which(dfc$FLOW==0), "FLOW"] <- 1
+
+moddf <- df[df$FLOW>0 & dfc$FLOW>0, ]
+moddfc <- dfc[df$FLOW>0 & dfc$FLOW>0, ]
+
+# check if all the negatives are gone from moddf and moddfc
+tbd <- moddf[moddf$FLOW<=0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+tbd <- moddfc[moddfc$FLOW<=0, "FLOW"]
+tbd <- na.omit(tbd)
+length(tbd) == 0
+
+# no longer needed
+remove(tbd)
+remove(df)
+remove(dfc)
+
+df_glm_agg <- moddf[1:(which(moddf$CDEC_ID=="AMA_INC")[1]-1),]
+df_glm_inc <- moddf[which(moddf$CDEC_ID=="AMA_INC")[1]:nrow(moddf),]
+df_glm_cagg <- moddfc[1:(which(moddfc$CDEC_ID=="AMA_INC")[1]-1),]
+df_glm_cinc <- moddfc[which(moddfc$CDEC_ID=="AMA_INC")[1]:nrow(moddfc),]
+
+df_glm_agg <- na.omit(df_glm_agg)
+df_glm_inc <- na.omit(df_glm_inc)
+df_glm_cagg <- na.omit(df_glm_cagg)
+df_glm_cinc <- na.omit(df_glm_cinc)
+
+# no longer needed
+remove(moddf)
+remove(moddfc)
+```
+
+# 3.0 Functions
+```{r funcstoimport}
+# library(hydroGOF) # this is giving wrong functions, do not load it in make sure the search path is clear
+goffuncs <- list.files("libraries/HydroGOFm/R")
+for(i in 1:length(goffuncs)){
+  source(paste0("libraries/HydroGOFm/R/", goffuncs[i]))
+}
+remove(goffuncs)
+
+search()
+```
+
+# 4.0 Modelling and Resampling
+```{r lm_modelling_and_cv}
+# group can be resub, 2L, 5L, 10L, logo, lmgo, lho. Notice how a plain 2, 5, and 10 will not work, you have to declare it an integer
+# datatype can be "agg" or "inc"
+
+library(dismo)
+lmcv <- function(data, groupingstyle, datatype){
+  # for resubstitution, where testing data and training data is the same
+  if(groupingstyle=="resub"){
+    linearmodel <- lm(FLOW~., data=data[,c(15,18:ncol(data))])
+    predictions <- predict(linearmodel, data, type='response')
+    results <- cbind(obs=data$FLOW, pred=predictions)
+    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+  }
+  
+  # for k-fold cross validation
+  if(is.integer(groupingstyle)){
+    group <- kfold(data, groupingstyle)
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:groupingstyle) {
+      trainset <- data[group != k, ]
+      testset <- data[group == k, ]
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # for leave one group (basin) out cross validation
+  if(groupingstyle=="logo"){
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:(length(unique(data$CDEC_ID)))){
+      h <- unique(data$CDEC_ID)[k]
+      testset <- data[data$CDEC_ID==h,]
+      trainset <- data[data$CDEC_ID!=h,]
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+    colnames(modgof) <- unique(data$CDEC_ID)
+  }
+  
+  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+  if(groupingstyle=="lmgo"){
+    nfolds <- 5
+    group <- as.data.frame(unique(data$CDEC_ID))
+    colnames(group) <- "CDEC_ID"
+    group$kftrain <- kfold(nrow(group), nfolds)
+    data <- merge(data, group, by="CDEC_ID")
+    
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:nfolds) {
+      testset <- data[data$kftrain == k, ]
+      trainset <- data[data$kftrain != k, ]
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # # for leave hierarchies out cross validation
+  # if(groupingstyle=="lho"){
+  # }
+  
+  if(groupingstyle=="resub"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else if(groupingstyle=="logo"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else{
+    list(mod=linearmodel, results=results, gof=modgof, kf=group)
+    }
+}
+
+# lm_agg_resub_results <- lmcv(df_lm_agg, "resub", "agg")
+# lm_agg_2fold_results <- lmcv(df_lm_agg, 2L, "agg")
+# lm_agg_5fold_results <- lmcv(df_lm_agg, 5L, "agg")
+# lm_agg_10fold_results <- lmcv(df_lm_agg, 10L, "agg")
+# lm_agg_logo_results <- lmcv(df_lm_agg, "logo", "agg")
+# lm_agg_lmgo_results <- lmcv(df_lm_agg, "lmgo", "agg")
+# 
+# lm_inc_resub_results <- lmcv(df_lm_inc, "resub", "inc")
+# lm_inc_2fold_results <- lmcv(df_lm_inc, 2L, "inc")
+# lm_inc_5fold_results <- lmcv(df_lm_inc, 5L, "inc")
+# lm_inc_10fold_results <- lmcv(df_lm_inc, 10L, "inc")
+# # not working with DOMGEOLOGY in it
+# lm_inc_logo_results <- lmcv(df_lm_inc, "logo", "inc")
+# lm_inc_lmgo_results <- lmcv(df_lm_inc, "lmgo", "inc") # no need to do this
+# 
+# lm_cagg_resub_results <- lmcv(df_lm_cagg, "resub", "agg")
+# lm_cagg_2fold_results <- lmcv(df_lm_cagg, 2L, "agg")
+# lm_cagg_5fold_results <- lmcv(df_lm_cagg, 5L, "agg")
+# lm_cagg_10fold_results <- lmcv(df_lm_cagg, 10L, "agg")
+# lm_cagg_logo_results <- lmcv(df_lm_cagg, "logo", "agg")
+# lm_cagg_lmgo_results <- lmcv(df_lm_cagg, "lmgo", "agg")
+# 
+# lm_cinc_resub_results <- lmcv(df_lm_cinc, "resub", "inc")
+# lm_cinc_2fold_results <- lmcv(df_lm_cinc, 2L, "inc")
+# lm_cinc_5fold_results <- lmcv(df_lm_cinc, 5L, "inc")
+# lm_cinc_10fold_results <- lmcv(df_lm_cinc, 10L, "inc")
+# # not working with DOMGEOLOGY in it
+# lm_cinc_logo_results <- lmcv(df_lm_cinc, "logo", "inc")
+# lm_cinc_lmgo_results <- lmcv(df_lm_inc, "lmgo", "inc") # no need to do this
+# 
+# saveRDS(lm_agg_logo_results, file="ch2 data transformations/outputdata/rds/lm_agg_logo_results.RDS")
+# saveRDS(lm_inc_logo_results, file="ch2 data transformations/outputdata/rds/lm_inc_logo_results.RDS")
+# saveRDS(lm_cagg_logo_results, file="ch2 data transformations/outputdata/rds/lm_cagg_logo_results.RDS")
+# saveRDS(lm_cinc_logo_results, file="ch2 data transformations/outputdata/rds/lm_cinc_logo_results.RDS")
+
+lm_agg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_agg_logo_results.RDS")
+lm_inc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_inc_logo_results.RDS")
+lm_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_cagg_logo_results.RDS")
+lm_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_cinc_logo_results.RDS")
+```
+
+```{r glm_modelling_and_cv}
+glmcv <- function(data, groupingstyle, datatype, ...){ 
+  # for resubstitution, where testing data and training data is the same
+  if(groupingstyle=="resub"){
+    linearmodel <- glm(FLOW~. , data=data[,c(15,18:ncol(data))], maxit=100, ...)
+    predictions <- predict(linearmodel, data, type='response')
+    results <- cbind(obs=data$FLOW, pred=predictions)
+    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+  }
+  
+  # for k-fold cross validation
+  if(is.integer(groupingstyle)){
+    group <- kfold(data, groupingstyle)
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:groupingstyle) {
+      trainset <- data[group != k, ]
+      testset <- data[group == k, ]
+      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], maxit=100, ...)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # for leave one group (basin) out cross validation
+  if(groupingstyle=="logo"){
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:(length(unique(data$CDEC_ID)))){
+      h <- unique(data$CDEC_ID)[k]
+      testset <- data[data$CDEC_ID==h,]
+      trainset <- data[data$CDEC_ID!=h,]
+      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], ...)
+      predictions <- predict(linearmodel[[k]], testset, type='response') # should this be "link" or "response"?
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+    colnames(modgof) <- unique(data$CDEC_ID)
+  }
+  
+  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+  if(groupingstyle=="lmgo"){
+    nfolds <- 5
+    group <- as.data.frame(unique(data$CDEC_ID))
+    colnames(group) <- "CDEC_ID"
+    group$kftrain <- kfold(nrow(group), nfolds)
+    data <- merge(data, group, by="CDEC_ID")
+    
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:nfolds) {
+      testset <- data[data$kftrain == k, ]
+      trainset <- data[data$kftrain != k, ]
+      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], maxit=100, ...)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # # for leave hierarchies out cross validation
+  # if(groupingstyle=="lho"){
+  # }
+  
+  if(groupingstyle=="resub"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else if(groupingstyle=="logo"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else{
+    list(mod=linearmodel, results=results, gof=modgof, kf=group)
+    }
+}
+
+# gamma 
+# glmgammalog_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=Gamma(link="log"), maxit=1000)
+# glmgammalog_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=Gamma(link="log"), maxit=1000)
+# glmgammalog_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=Gamma(link="log"), maxit=1000)
+# glmgammalog_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=Gamma(link="log"), maxit=1000)
+# saveRDS(glmgammalog_agg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammalog_agg_logo_results.RDS")
+# saveRDS(glmgammalog_inc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammalog_inc_logo_results.RDS")
+# saveRDS(glmgammalog_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammalog_cagg_logo_results.RDS")
+# saveRDS(glmgammalog_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammalog_cinc_logo_results.RDS")
+
+# glmgammainv_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=Gamma(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammainv_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=Gamma(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammainv_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=Gamma(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammainv_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=Gamma(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glmgammainv_agg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammainv_agg_logo_results.RDS")
+# saveRDS(glmgammainv_inc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammainv_inc_logo_results.RDS")
+# saveRDS(glmgammainv_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammainv_cagg_logo_results.RDS")
+# saveRDS(glmgammainv_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammainv_cinc_logo_results.RDS")
+
+# glmgammai_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=Gamma(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammai_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=Gamma(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammai_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=Gamma(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glmgammai_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=Gamma(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glmgammai_agg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammai_agg_logo_results.RDS")
+# saveRDS(glmgammai_inc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammai_inc_logo_results.RDS")
+# saveRDS(glmgammai_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glmgammai_cagg_logo_results.RDS")
+# saveRDS(glmgammai_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glmgammai_cinc_logo_results.RDS")
+
+# inverse gaussian
+# glminvnormsq_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=inverse.gaussian(link="1/mu^2"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormsq_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=inverse.gaussian(link="1/mu^2"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormsq_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=inverse.gaussian(link="1/mu^2"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormsq_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=inverse.gaussian(link="1/mu^2"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glminvnormsq_agg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormsq_agg_logo_results.RDS")
+# saveRDS(glminvnormsq_inc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormsq_inc_logo_results.RDS")
+# saveRDS(glminvnormsq_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormsq_cagg_logo_results.RDS")
+# saveRDS(glminvnormsq_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormsq_cinc_logo_results.RDS")
+
+# glminvnorminv_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=inverse.gaussian(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnorminv_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=inverse.gaussian(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnorminv_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=inverse.gaussian(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnorminv_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=inverse.gaussian(link="inverse"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glminvnorminv_agg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnorminv_agg_logo_results.RDS")
+# saveRDS(glminvnorminv_inc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnorminv_inc_logo_results.RDS")
+# saveRDS(glminvnorminv_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnorminv_cagg_logo_results.RDS")
+# saveRDS(glminvnorminv_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnorminv_cinc_logo_results.RDS")
+
+# glminvnormlog_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=inverse.gaussian(link="log"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormlog_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=inverse.gaussian(link="log"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormlog_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=inverse.gaussian(link="log"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormlog_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=inverse.gaussian(link="log"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glminvnormlog_agg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormlog_agg_logo_results.RDS")
+# saveRDS(glminvnormlog_inc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormlog_inc_logo_results.RDS")
+# saveRDS(glminvnormlog_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormlog_cagg_logo_results.RDS")
+# saveRDS(glminvnormlog_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormlog_cinc_logo_results.RDS")
+
+# glminvnormi_agg_logo_results <- glmcv(df_glm_agg, "logo", "agg", family=inverse.gaussian(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormi_inc_logo_results <- glmcv(df_glm_inc, "logo", "inc", family=inverse.gaussian(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormi_cagg_logo_results <- glmcv(df_glm_cagg, "logo", "cagg", family=inverse.gaussian(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# glminvnormi_cinc_logo_results <- glmcv(df_glm_cinc, "logo", "cinc", family=inverse.gaussian(link="identity"), maxit=1000, start=c(0, rep(1, 25)))
+# saveRDS(glminvnormi_agg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormi_agg_logo_results.RDS")
+# saveRDS(glminvnormi_inc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormi_inc_logo_results.RDS")
+# saveRDS(glminvnormi_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormi_cagg_logo_results.RDS")
+# saveRDS(glminvnormi_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glminvnormi_cinc_logo_results.RDS")
+
+# Tweedie, this distribution can handle 0s. So use the lm dataset here
+# var.power=0 is the Gaussian family, 1 is Poisson, 2 is Gamma, 3 is inverse Gaussian. Any value except (0,1) is acceptable since it is the power alpha on the exponential: var(y)=mu^alpha*phi. The link is specified in terms of Box-Cox transformation powers, so link.power=1 is the identity link and link.power=0 means log.
+
+library(statmod)
+# glmtwd_agg_logo_results <- glmcv(df_lm_agg, "logo", "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# glmtwd_inc_logo_results <- glmcv(df_lm_inc, "logo", "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# glmtwd_cagg_logo_results <- glmcv(df_lm_cagg, "logo", "cagg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# glmtwd_cinc_logo_results <- glmcv(df_lm_cinc, "logo", "cinc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# saveRDS(glmtwd_agg_logo_results, file="ch2 data transformations/outputdata/rds/glmtwd_agg_logo_results.RDS")
+# saveRDS(glmtwd_inc_logo_results, file="ch2 data transformations/outputdata/rds/glmtwd_inc_logo_results.RDS")
+# saveRDS(glmtwd_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glmtwd_cagg_logo_results.RDS")
+# saveRDS(glmtwd_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glmtwd_cinc_logo_results.RDS")
+
+# mean(unlist(glmtwd_cagg_logo_results[["gof"]]["bR2", ]))
+
+glmlognormalcv <- function(data, groupingstyle, datatype){    
+  # for resubstitution, where testing data and training data is the same
+  if(groupingstyle=="resub"){
+    linearmodel <- glm(log(FLOW)~. , family=gaussian(link="identity"), data=data[,c(15,18:ncol(data))], maxit=100)
+    predictions <- predict(linearmodel, data, type='response')
+    results <- cbind(obs=data$FLOW, pred=exp(predictions))
+    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+  }
+  
+  # for k-fold cross validation
+  if(is.integer(groupingstyle)){
+    group <- kfold(data, groupingstyle)
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:groupingstyle) {
+      trainset <- data[group != k, ]
+      testset <- data[group == k, ]
+      linearmodel[[k]] <- glm(log(FLOW)~. , family=gaussian(link="identity"), data=trainset[,c(15,18:ncol(trainset))], maxit=100)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=exp(predictions))
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # for leave one group (basin) out cross validation
+  if(groupingstyle=="logo"){
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:(length(unique(data$CDEC_ID)))){
+      h <- unique(data$CDEC_ID)[k]
+      testset <- data[data$CDEC_ID==h,]
+      trainset <- data[data$CDEC_ID!=h,]
+      linearmodel[[k]] <- glm(log(FLOW)~. , family=gaussian(link="identity"), data=trainset[,c(15,18:ncol(trainset))], maxit=1000)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=exp(predictions))
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+    colnames(modgof) <- unique(data$CDEC_ID)
+  }
+  
+  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+  if(groupingstyle=="lmgo"){
+    nfolds <- 5
+    group <- as.data.frame(unique(data$CDEC_ID))
+    colnames(group) <- "CDEC_ID"
+    group$kftrain <- kfold(nrow(group), nfolds)
+    data <- merge(data, group, by="CDEC_ID")
+    
+    linearmodel <- results <- modgof <- list()
+    for (k in 1:nfolds) {
+      testset <- data[data$kftrain == k, ]
+      trainset <- data[data$kftrain != k, ]
+      linearmodel[[k]] <- glm(log(FLOW)~. , family=gaussian(link="identity"), data=trainset[,c(15,18:ncol(trainset))], maxit=100)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=exp(predictions))
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # # for leave hierarchies out cross validation
+  # if(groupingstyle=="lho"){
+  # }
+  
+  if(groupingstyle=="resub"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else if(groupingstyle=="logo"){
+    list(mod=linearmodel, results=results, gof=modgof)
+    }
+  else{
+    list(mod=linearmodel, results=results, gof=modgof, kf=group)
+    }
+}
+
+# glmlognormal_agg_logo_results <- glmgammacv(df_glm_agg, "logo", "agg")
+# glmlognormal_inc_logo_results <- glmgammacv(df_glm_inc, "logo", "inc")
+# glmlognormal_cagg_logo_results <- glmgammacv(df_glm_cagg, "logo", "agg")
+# glmlognormal_cinc_logo_results <- glmgammacv(df_glm_cinc, "logo", "inc")
+# saveRDS(glmlognormal_agg_logo_results, file="ch2 data transformations/outputdata/rds/glmlognormal_agg_logo_results.RDS")
+# saveRDS(glmlognormal_inc_logo_results, file="ch2 data transformations/outputdata/rds/glmlognormal_inc_logo_results.RDS")
+# saveRDS(glmlognormal_cagg_logo_results, file="ch2 data transformations/outputdata/rds/glmlognormal_cagg_logo_results.RDS")
+# saveRDS(glmlognormal_cinc_logo_results, file="ch2 data transformations/outputdata/rds/glmlognormal_cinc_logo_results.RDS")
+
+# pick which glm you're going to go with, I think the tweedie is doing mighty fine!!!
+glm_agg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd_agg_logo_results.RDS")
+glm_inc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd_inc_logo_results.RDS")
+glm_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd_cagg_logo_results.RDS")
+glm_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd_cinc_logo_results.RDS")
+```
+
+```{r rf_modelling_and_cv}
+# we are not saving the models because it takes too much memory. so rrfmodel is no longer specified as a list and took mod=rfmodel out of return list. 
+
+library(randomForest)
+
+# # let's first optimize the tuning parameter mtry
+# trf <- tuneRF(df_lm_inc[,c(15,18:ncol(df_lm_inc))], df_lm_inc$FLOW, mtryStart=5, stepFactor=2)
+# mt <- trf[which.min(trf[,2]), 1]
+mt <- 20
+
+rfcv <- function(data, groupingstyle, datatype){
+  # for resubstitution, where testing data and training data is the same
+  if(groupingstyle=="resub"){
+    rfmodel <- randomForest(FLOW~. , data=data[,c(15,18:ncol(data))], mtry=mt)
+    predictions <- predict(rfmodel, data, type='response')
+    results <- cbind(obs=data$FLOW, pred=predictions)
+    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+  }
+  
+  # for k-fold cross validation
+  if(is.integer(groupingstyle)){
+    group <- kfold(data, groupingstyle)
+    results <- modgof <- list()
+    for (k in 1:groupingstyle) {
+      trainset <- data[group != k, ]
+      testset <- data[group == k, ]
+      rfmodel <- randomForest(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], mtry=mt)
+      predictions <- predict(rfmodel, testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # for leave one group (basin) out cross validation
+  if(groupingstyle=="logo"){
+    results <- modgof <- list()
+    for (k in 1:(length(unique(data$CDEC_ID)))){
+      h <- unique(data$CDEC_ID)[k]
+      testset <- data[data$CDEC_ID==h,]
+      trainset <- data[data$CDEC_ID!=h,]
+      rfmodel <- randomForest(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], mtry=mt)
+      predictions <- predict(rfmodel, testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+    colnames(modgof) <- unique(data$CDEC_ID)
+  }
+  
+  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+  if(groupingstyle=="lmgo"){
+    nfolds <- 5
+    group <- as.data.frame(unique(data$CDEC_ID))
+    colnames(group) <- "CDEC_ID"
+    group$kftrain <- kfold(nrow(group), nfolds)
+    data <- merge(data, group, by="CDEC_ID")
+    
+    results <- modgof <- list()
+    for (k in 1:nfolds) {
+      testset <- data[data$kftrain == k, ]
+      trainset <- data[data$kftrain != k, ]
+      rfmodel <- randomForest(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], mtry=mt)
+      predictions <- predict(rfmodel, testset, type='response')
+      results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  if(groupingstyle=="resub"){
+    list(results=results, gof=modgof)
+  } else if(groupingstyle=="logo"){
+    list(results=results, gof=modgof)
+  } else{
+    list(results=results, gof=modgof, kf=group)
+  }
+}
+
+# rf_agg_resub_results <- rfcv(df_lm_agg, "resub", "agg")
+# rf_agg_2fold_results <- rfcv(df_lm_agg, 2L, "agg")
+# rf_agg_5fold_results <- rfcv(df_lm_agg, 5L, "agg")
+# rf_agg_10fold_results <- rfcv(df_lm_agg, 10L, "agg")
+# rf_agg_lmgo_results <- rfcv(df_lm_agg, "lmgo", "agg")
+# 
+# rf_inc_resub_results <- rfcv(df_lm_inc, "resub", "inc")
+# rf_inc_2fold_results <- rfcv(df_lm_inc, 2L, "inc")
+# rf_inc_5fold_results <- rfcv(df_lm_inc, 5L, "inc")
+# rf_inc_10fold_results <- rfcv(df_lm_inc, 10L, "inc")
+# rf_inc_lmgo_results <- rfcv(df_lm_inc, "lmgo", "inc")
+# 
+# rf_cagg_resub_results <- rfcv(df_lm_cagg, "resub", "agg")
+# rf_cagg_2fold_results <- rfcv(df_lm_cagg, 2L, "agg")
+# rf_cagg_5fold_results <- rfcv(df_lm_cagg, 5L, "agg")
+# rf_cagg_10fold_results <- rfcv(df_lm_cagg, 10L, "agg")
+# rf_cagg_lmgo_results <- rfcv(df_lm_cagg, "lmgo", "agg")
+# 
+# rf_cinc_resub_results <- rfcv(df_lm_cinc, "resub", "inc")
+# rf_cinc_2fold_results <- rfcv(df_lm_cinc, 2L, "inc")
+# rf_cinc_5fold_results <- rfcv(df_lm_cinc, 5L, "inc")
+# rf_cinc_10fold_results <- rfcv(df_lm_cinc, 10L, "inc")
+# rf_cinc_lmgo_results <- rfcv(df_lm_cinc, "lmgo", "inc")
+
+# rf_agg_logo_results <- rfcv(df_lm_agg, "logo", "agg")
+# rf_inc_logo_results <- rfcv(df_lm_inc, "logo", "inc")
+# rf_cagg_logo_results <- rfcv(df_lm_cagg, "logo", "agg")
+# rf_cinc_logo_results <- rfcv(df_lm_cinc, "logo", "inc")
+
+# saveRDS(rf_agg_logo_results, file="ch2 data transformations/outputdata/rds/rf_agg_logo_results.RDS")
+# saveRDS(rf_inc_logo_results, file="ch2 data transformations/outputdata/rds/rf_inc_logo_results.RDS")
+# saveRDS(rf_cagg_logo_results, file="ch2 data transformations/outputdata/rds/rf_cagg_logo_results.RDS")
+# saveRDS(rf_cinc_logo_results, file="ch2 data transformations/outputdata/rds/rf_cinc_logo_results.RDS")
+
+rf_agg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/rf_agg_logo_results.RDS")
+rf_inc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/rf_inc_logo_results.RDS")
+rf_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/rf_cagg_logo_results.RDS")
+rf_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/rf_cinc_logo_results.RDS")
+```
+
+```{r nn_modeling_and_cv}
+# install and set up our environment for deep learning
+# devtools::install_github("rstudio/keras")
+library(keras)
+install_keras(method = "conda")
+
+nncv <- function(data, groupingstyle, datatype){
+  # the model network includes two layers of fully-connected relu activated neurons, and an output layer with no transformation. units are the number of hidden nodes
+  trainingdim <- dim(data[,c(15,18:(ncol(data)-1))])
+  nnmodel <- keras_model_sequential() %>%
+  layer_dense(units=64, activation="relu", input_shape=trainingdim[[2]]) %>%
+  layer_dense(units=64, activation="relu") %>%
+  layer_dense(units=1) # number of outputs, here we just want one prediction
+    
+  nnmodel %>% # to compile the model, loss functions are defined here
+    compile(optimizer="rmsprop", loss=keras::loss_mean_squared_error, metrics=c("mae"))
+    
+  # for resubstitution, where testing data and training data is the same
+  if(groupingstyle=="resub"){
+    trainsetpvs <- as.matrix(data[,c(15,18:(ncol(data)-1))])
+    trainsetrv <- as.matrix(data$FLOW)
+    nnmodel %>%  # this is to fit the model coefficients
+      fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+    predictions <- nnmodel %>% predict(trainsetpvs)
+    predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+    results <- cbind(obs=trainsetrv[ , 1], pred=predictions)
+    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+  }
+  
+  # for k-fold cross validation
+  if(is.integer(groupingstyle)){
+    group <- kfold(data, groupingstyle)
+    results <- modgof <- list()
+    for (k in 1:groupingstyle) {
+      trainset <- data[group != k, ]
+      testset <- data[group == k, ]
+      
+      # seperate into predictor variables and response variable
+      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+      testsetrv <- as.matrix(testset$FLOW)
+      trainsetrv <- as.matrix(trainset$FLOW)
+      
+      nnmodel %>% 
+        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+      predictions <- nnmodel %>% predict(testsetpvs)
+      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  # for leave one group (basin) out cross validation
+  if(groupingstyle=="logo"){
+    results <- modgof <- list()
+  
+    for (k in 1:(length(unique(data$CDEC_ID)))){
+      h <- unique(data$CDEC_ID)[k]
+      testset <- data[data$CDEC_ID==h,]
+      trainset <- data[data$CDEC_ID!=h,]
+      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+      testsetrv <- as.matrix(testset$FLOW)
+      trainsetrv <- as.matrix(trainset$FLOW)
+      
+      nnmodel %>%  
+        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+      predictions <- nnmodel %>% predict(testsetpvs)
+      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+    colnames(modgof) <- unique(data$CDEC_ID)
+  }
+  
+  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+  if(groupingstyle=="lmgo"){
+    nfolds <- 5
+    group <- as.data.frame(unique(data$CDEC_ID))
+    colnames(group) <- "CDEC_ID"
+    group$kftrain <- kfold(nrow(group), nfolds)
+    data <- merge(data, group, by="CDEC_ID")
+    
+    results <- modgof <- list()
+    for (k in 1:nfolds) {
+      testset <- data[data$kftrain == k, ]
+      trainset <- data[data$kftrain != k, ]
+      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+      testsetrv <- as.matrix(testset$FLOW)
+      trainsetrv <- as.matrix(trainset$FLOW)
+      
+      nnmodel %>% 
+        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+      predictions <- nnmodel %>% predict(testsetpvs)
+      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+    }
+    names_tbd <- rownames(modgof[[1]])
+    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+    rownames(modgof) <- names_tbd
+  }
+  
+  if(groupingstyle=="resub"){
+    list(results=results, gof=modgof)
+  } else if(groupingstyle=="logo"){
+    list(results=results, gof=modgof)
+  } else{
+    list(results=results, gof=modgof, kf=group)
+  }
+}
+
+# nn_agg_logo_results <- nncv(df_lm_agg, "logo", "agg")
+# nn_inc_logo_results <- nncv(df_lm_inc, "logo", "inc")
+# nn_cagg_logo_results <- nncv(df_lm_cagg, "logo", "agg")
+# nn_cinc_logo_results <- nncv(df_lm_cinc, "logo", "inc")
+# 
+# saveRDS(nn_agg_logo_results, file="ch2 data transformations/outputdata/rds/nn_agg_logo_results.RDS")
+# saveRDS(nn_inc_logo_results, file="ch2 data transformations/outputdata/rds/nn_inc_logo_results.RDS")
+# saveRDS(nn_cagg_logo_results, file="ch2 data transformations/outputdata/rds/nn_cagg_logo_results.RDS")
+# saveRDS(nn_cinc_logo_results, file="ch2 data transformations/outputdata/rds/nn_cinc_logo_results.RDS")
+
+nn_agg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/nn_agg_logo_results.RDS")
+nn_inc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/nn_inc_logo_results.RDS")
+nn_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/nn_cagg_logo_results.RDS")
+nn_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/nn_cinc_logo_results.RDS")
+```
+
+For saving results
+```{r data_results_df}
+# make a copy of the original dataframes to add the results to later
+results_lm_agg <- df_lm_agg
+results_lm_inc <- df_lm_inc
+results_lm_cagg <- df_lm_cagg
+results_lm_cinc <- df_lm_cinc
+
+# notice how the lm, not glm dataset was used for the Tweedie distribution
+results_glm_agg <- df_lm_agg
+results_glm_inc <- df_lm_inc
+results_glm_cagg <- df_lm_cagg
+results_glm_cinc <- df_lm_cinc
+
+# use the same dataset as the lm for the rf and nn
+results_nn_agg <- results_rf_agg <- df_lm_agg
+results_nn_inc <- results_rf_inc <- df_lm_inc
+results_nn_cagg <- results_rf_cagg <- df_lm_cagg
+results_nn_cinc <- results_rf_cinc <- df_lm_cinc
+```
+
+# 5.0 LOGO Post Processing 
+
+## 5.1 Aggregate basins
+```{r results_dataframes}
+# put the logo results in their respective dataframes, consider making this a function so you're not copy pasting
+lm_agg_logo_results_unlisted <- as.data.frame(do.call("rbind", lm_agg_logo_results$results))
+results_lm_agg <- cbind(results_lm_agg, LMLOGOFIT=lm_agg_logo_results_unlisted$pred)
+results_lm_agg$LMLOGORES <- results_lm_agg$LMLOGOFIT-results_lm_agg$FLOW # this is pred - obs
+  
+lm_cagg_logo_results_unlisted <- as.data.frame(do.call("rbind", lm_cagg_logo_results$results))
+results_lm_cagg <- cbind(results_lm_cagg, LMLOGOFIT=lm_cagg_logo_results_unlisted$pred)
+results_lm_cagg$LMLOGORES <- results_lm_cagg$LMLOGOFIT-results_lm_cagg$FLOW 
+
+glm_agg_logo_results_unlisted <- as.data.frame(do.call("rbind", glm_agg_logo_results$results))
+results_glm_agg <- cbind(results_glm_agg, LMLOGOFIT=glm_agg_logo_results_unlisted$pred)
+results_glm_agg$LMLOGORES <- results_glm_agg$LMLOGOFIT-results_glm_agg$FLOW 
+  
+glm_cagg_logo_results_unlisted <- as.data.frame(do.call("rbind", glm_cagg_logo_results$results))
+results_glm_cagg <- cbind(results_glm_cagg, LMLOGOFIT=glm_cagg_logo_results_unlisted$pred)
+results_glm_cagg$LMLOGORES <- results_glm_cagg$LMLOGOFIT-results_glm_cagg$FLOW 
+
+rf_agg_logo_results_unlisted <- as.data.frame(do.call("rbind", rf_agg_logo_results$results))
+results_rf_agg <- cbind(results_rf_agg, LMLOGOFIT=rf_agg_logo_results_unlisted$pred)
+results_rf_agg$LMLOGORES <- results_rf_agg$LMLOGOFIT-results_rf_agg$FLOW 
+  
+rf_cagg_logo_results_unlisted <- as.data.frame(do.call("rbind", rf_cagg_logo_results$results))
+results_rf_cagg <- cbind(results_rf_cagg, LMLOGOFIT=rf_cagg_logo_results_unlisted$pred)
+results_rf_cagg$LMLOGORES <- results_rf_cagg$LMLOGOFIT-results_rf_cagg$FLOW 
+
+nn_agg_logo_results_unlisted <- as.data.frame(do.call("rbind", nn_agg_logo_results$results))
+results_nn_agg <- cbind(results_nn_agg, LMLOGOFIT=nn_agg_logo_results_unlisted$pred)
+results_nn_agg$LMLOGORES <- results_nn_agg$LMLOGOFIT-results_nn_agg$FLOW 
+  
+nn_cagg_logo_results_unlisted <- as.data.frame(do.call("rbind", nn_cagg_logo_results$results))
+results_nn_cagg <- cbind(results_nn_cagg, LMLOGOFIT=nn_cagg_logo_results_unlisted$pred)
+results_nn_cagg$LMLOGORES <- results_nn_cagg$LMLOGOFIT-results_nn_cagg$FLOW
+```
+
+## 5.2 Incremental Basins
+```{r post_processing_lm_logo_inc}
+# add the observed data from basins above back in to the incremental predictions. This makes sense for "inc" dataframes and for LOGO CV and LHO CV results only!
+
+# put the logo results in the original dataframe format
+lm_inc_logo_results_unlisted <- as.data.frame(do.call("rbind", lm_inc_logo_results$results))
+results_lm_inc <- cbind(results_lm_inc, LMLOGOFIT=lm_inc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_lm_inc_wide <- dcast(melt(results_lm_inc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_lm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_lm_inc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_lm_inc_wide$DATE), ]
+max(results_lm_inc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_lm_inc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_lm_inc_agg_wide <- results_lm_inc_wide
+i <- 1
+for(n in colnames(results_lm_inc_wide)[2:length(colnames(results_lm_inc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_lm_inc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_lm_inc_wide[, n]}
+  results_lm_inc_agg_wide <- cbind(results_lm_inc_agg_wide, b_ag)
+  colnames(results_lm_inc_agg_wide)[dim(results_lm_inc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_lm_inc_agg_long <- melt(results_lm_inc_agg_wide, id.vars="DATE", measure.vars = colnames(results_lm_inc_agg_wide)[69:ncol(results_lm_inc_agg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_lm_inc_agg_long) == nrow(results_lm_agg)
+
+# put in results, merge in so that it's joined correctly
+results_lm_inc_agg_long$CDEC_ID_JOIN <- substr(results_lm_inc_agg_long$CDEC_ID, 1, 3)
+results_lm_agg <- merge(results_lm_agg, results_lm_inc_agg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_lm_agg$LMLOGORES_AGG <- results_lm_agg$LMLOGOFIT_AGG-results_lm_agg$FLOW
+```
+
+```{r post_processing_glm_logo_inc}
+# put the logo results in the original dataframe format
+glm_inc_logo_results_unlisted <- as.data.frame(do.call("rbind", glm_inc_logo_results$results))
+results_glm_inc <- cbind(results_glm_inc, LMLOGOFIT=glm_inc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_glm_inc_wide <- dcast(melt(results_glm_inc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_glm_inc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_glm_inc_wide$DATE), ]
+max(results_glm_inc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_glm_inc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_glm_inc_agg_wide <- results_glm_inc_wide
+i <- 1
+for(n in colnames(results_glm_inc_wide)[2:length(colnames(results_glm_inc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_glm_inc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_glm_inc_wide[, n]}
+  results_glm_inc_agg_wide <- cbind(results_glm_inc_agg_wide, b_ag)
+  colnames(results_glm_inc_agg_wide)[dim(results_glm_inc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_glm_inc_agg_long <- melt(results_glm_inc_agg_wide, id.vars="DATE", measure.vars = colnames(results_glm_inc_agg_wide)[69:ncol(results_glm_inc_agg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_glm_inc_agg_long) == nrow(results_glm_agg)
+
+# put in results, merge in so that it's joined correctly
+results_glm_inc_agg_long$CDEC_ID_JOIN <- substr(results_glm_inc_agg_long$CDEC_ID, 1, 3)
+results_glm_agg <- merge(results_glm_agg, results_glm_inc_agg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_glm_agg$LMLOGORES_AGG <- results_glm_agg$LMLOGOFIT_AGG-results_glm_agg$FLOW
+```
+
+```{r post_processing_rf_logo_inc}
+# put the logo results in the original dataframe format
+rf_inc_logo_results_unlisted <- as.data.frame(do.call("rbind", rf_inc_logo_results$results))
+results_rf_inc <- cbind(results_rf_inc, LMLOGOFIT=rf_inc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_rf_inc_wide <- dcast(melt(results_rf_inc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_rf_inc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_rf_inc_wide$DATE), ]
+max(results_rf_inc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_rf_inc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_rf_inc_agg_wide <- results_rf_inc_wide
+i <- 1
+for(n in colnames(results_rf_inc_wide)[2:length(colnames(results_rf_inc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_rf_inc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_rf_inc_wide[, n]}
+  results_rf_inc_agg_wide <- cbind(results_rf_inc_agg_wide, b_ag)
+  colnames(results_rf_inc_agg_wide)[dim(results_rf_inc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_rf_inc_agg_long <- melt(results_rf_inc_agg_wide, id.vars="DATE", measure.vars = colnames(results_rf_inc_agg_wide)[69:ncol(results_rf_inc_agg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_rf_inc_agg_long) == nrow(results_rf_agg)
+
+# put in results, merge in so that it's joined correctly
+results_rf_inc_agg_long$CDEC_ID_JOIN <- substr(results_rf_inc_agg_long$CDEC_ID, 1, 3)
+results_rf_agg <- merge(results_rf_agg, results_rf_inc_agg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_rf_agg$LMLOGORES_AGG <- results_rf_agg$LMLOGOFIT_AGG-results_rf_agg$FLOW
+```
+
+```{r post_processing_nn_logo_inc}
+# put the logo results in the original dataframe format
+nn_inc_logo_results_unlisted <- as.data.frame(do.call("rbind", nn_inc_logo_results$results))
+results_nn_inc <- cbind(results_nn_inc, LMLOGOFIT=nn_inc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_nn_inc_wide <- dcast(melt(results_nn_inc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_nn_inc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_nn_inc_wide$DATE), ]
+max(results_nn_inc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_nn_inc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_nn_inc_agg_wide <- results_nn_inc_wide
+i <- 1
+for(n in colnames(results_nn_inc_wide)[2:length(colnames(results_nn_inc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_nn_inc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_nn_inc_wide[, n]}
+  results_nn_inc_agg_wide <- cbind(results_nn_inc_agg_wide, b_ag)
+  colnames(results_nn_inc_agg_wide)[dim(results_nn_inc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_nn_inc_agg_long <- melt(results_nn_inc_agg_wide, id.vars="DATE", measure.vars = colnames(results_nn_inc_agg_wide)[69:ncol(results_nn_inc_agg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_nn_inc_agg_long) == nrow(results_nn_agg)
+
+# put in results, merge in so that it's joined correctly
+results_nn_inc_agg_long$CDEC_ID_JOIN <- substr(results_nn_inc_agg_long$CDEC_ID, 1, 3)
+results_nn_agg <- merge(results_nn_agg, results_nn_inc_agg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_nn_agg$LMLOGORES_AGG <- results_nn_agg$LMLOGOFIT_AGG-results_nn_agg$FLOW
+```
+
+```{r post_processing_lm_logo_cinc}
+# put the logo results in the original dataframe format
+lm_cinc_logo_results_unlisted <- as.data.frame(do.call("rbind", lm_cinc_logo_results$results))
+results_lm_cinc <- cbind(results_lm_cinc, LMLOGOFIT=lm_cinc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_lm_cinc_wide <- dcast(melt(results_lm_cinc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_lm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_lm_cinc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_lm_cinc_wide$DATE), ]
+max(results_lm_cinc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_lm_cinc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_lm_cinc_cagg_wide <- results_lm_cinc_wide
+i <- 1
+for(n in colnames(results_lm_cinc_wide)[2:length(colnames(results_lm_cinc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_lm_cinc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_lm_cinc_wide[, n]}
+  results_lm_cinc_cagg_wide <- cbind(results_lm_cinc_cagg_wide, b_ag)
+  colnames(results_lm_cinc_cagg_wide)[dim(results_lm_cinc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_lm_cinc_cagg_long <- melt(results_lm_cinc_cagg_wide, id.vars="DATE", measure.vars = colnames(results_lm_cinc_cagg_wide)[69:ncol(results_lm_cinc_cagg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_lm_cinc_cagg_long) == nrow(results_lm_agg)
+
+# put in results, merge in so that it's joined correctly
+results_lm_cinc_cagg_long$CDEC_ID_JOIN <- substr(results_lm_cinc_cagg_long$CDEC_ID, 1, 3)
+results_lm_cagg <- merge(results_lm_cagg, results_lm_cinc_cagg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_lm_cagg$LMLOGORES_AGG <- results_lm_cagg$LMLOGOFIT_AGG-results_lm_cagg$FLOW
+```
+
+```{r post_processing_glm_logo_cinc}
+# put the logo results in the original dataframe format
+glm_cinc_logo_results_unlisted <- as.data.frame(do.call("rbind", glm_cinc_logo_results$results))
+results_glm_cinc <- cbind(results_glm_cinc, LMLOGOFIT=glm_cinc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_glm_cinc_wide <- dcast(melt(results_glm_cinc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_glm_cinc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_glm_cinc_wide$DATE), ]
+max(results_glm_cinc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_glm_cinc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_glm_cinc_cagg_wide <- results_glm_cinc_wide
+i <- 1
+for(n in colnames(results_glm_cinc_wide)[2:length(colnames(results_glm_cinc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_glm_cinc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_glm_cinc_wide[, n]}
+  results_glm_cinc_cagg_wide <- cbind(results_glm_cinc_cagg_wide, b_ag)
+  colnames(results_glm_cinc_cagg_wide)[dim(results_glm_cinc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_glm_cinc_cagg_long <- melt(results_glm_cinc_cagg_wide, id.vars="DATE", measure.vars = colnames(results_glm_cinc_cagg_wide)[69:ncol(results_glm_cinc_cagg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_glm_cinc_cagg_long) == nrow(results_glm_cagg)
+
+# put in results, merge in so that it's joined correctly
+results_glm_cinc_cagg_long$CDEC_ID_JOIN <- substr(results_glm_cinc_cagg_long$CDEC_ID, 1, 3)
+results_glm_cagg <- merge(results_glm_cagg, results_glm_cinc_cagg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_glm_cagg$LMLOGORES_AGG <- results_glm_cagg$LMLOGOFIT_AGG-results_glm_cagg$FLOW
+```
+
+```{r post_processing_rf_logo_cinc}
+# put the logo results in the original dataframe format
+rf_cinc_logo_results_unlisted <- as.data.frame(do.call("rbind", rf_cinc_logo_results$results))
+results_rf_cinc <- cbind(results_rf_cinc, LMLOGOFIT=rf_cinc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_rf_cinc_wide <- dcast(melt(results_rf_cinc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_rf_cinc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_rf_cinc_wide$DATE), ]
+max(results_rf_cinc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_rf_cinc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_rf_cinc_cagg_wide <- results_rf_cinc_wide
+i <- 1
+for(n in colnames(results_rf_cinc_wide)[2:length(colnames(results_rf_cinc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_rf_cinc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_rf_cinc_wide[, n]}
+  results_rf_cinc_cagg_wide <- cbind(results_rf_cinc_cagg_wide, b_ag)
+  colnames(results_rf_cinc_cagg_wide)[dim(results_rf_cinc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_rf_cinc_cagg_long <- melt(results_rf_cinc_cagg_wide, id.vars="DATE", measure.vars = colnames(results_rf_cinc_cagg_wide)[69:ncol(results_rf_cinc_cagg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_rf_cinc_cagg_long) == nrow(results_rf_cagg)
+
+# put in results, merge in so that it's joined correctly
+results_rf_cinc_cagg_long$CDEC_ID_JOIN <- substr(results_rf_cinc_cagg_long$CDEC_ID, 1, 3)
+results_rf_cagg <- merge(results_rf_cagg, results_rf_cinc_cagg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_rf_cagg$LMLOGORES_AGG <- results_rf_cagg$LMLOGOFIT_AGG-results_rf_cagg$FLOW
+```
+
+```{r post_processing_nn_logo_cinc}
+# put the logo results in the original dataframe format
+nn_cinc_logo_results_unlisted <- as.data.frame(do.call("rbind", nn_cinc_logo_results$results))
+results_nn_cinc <- cbind(results_nn_cinc, LMLOGOFIT=nn_cinc_logo_results_unlisted$pred)
+
+# put the results in wide format
+library(reshape2)
+results_nn_cinc_wide <- dcast(melt(results_nn_cinc[,c("DATE", "CDEC_ID", "LMLOGOFIT")], id.vars=c("DATE", "CDEC_ID")), DATE~CDEC_ID) # notice the LMLOGOFIT, that's the fitted values
+
+# results_glm_inc_wide and cdec_fnf_wide should be in the right order and record length should be the same, check. since they don't match, trim cdec_fnf_wide so they do
+cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>=min(results_nn_cinc_wide$DATE) & cdec_fnf_wide$DATE<=max(results_nn_cinc_wide$DATE), ]
+max(results_nn_cinc_wide$DATE) == max(cdec_fnf_wide$DATE)
+min(results_nn_cinc_wide$DATE) == min(cdec_fnf_wide$DATE)
+
+# make an empty dataframe
+results_nn_cinc_cagg_wide <- results_nn_cinc_wide
+i <- 1
+for(n in colnames(results_nn_cinc_wide)[2:length(colnames(results_nn_cinc_wide))]){
+  b <- substr(n, 1, 3)
+  basinabove1 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$CDEC_ID == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_ag <- results_nn_cinc_wide[, n] + cdec_fnf_wide[, basinabove1]
+    if(basinabove2!="none"){
+      b_ag <- b_ag + cdec_fnf_wide[, basinabove2]
+      if(basinabove3!="none"){
+        b_ag <- b_ag + cdec_fnf_wide[, basinabove3]
+        if(basinabove4!="none"){
+            b_ag <- b_ag + cdec_fnf_wide[, basinabove4]
+          } else{b_ag} 
+       } else{b_ag}
+    } else{b_ag}
+  } else{b_ag <- results_nn_cinc_wide[, n]}
+  results_nn_cinc_cagg_wide <- cbind(results_nn_cinc_cagg_wide, b_ag)
+  colnames(results_nn_cinc_cagg_wide)[dim(results_nn_cinc_wide)[2]+i] <- paste0(b,"_INC_AGG")
+  i <- i+1
+}
+
+# make this back into long format 
+results_nn_cinc_cagg_long <- melt(results_nn_cinc_cagg_wide, id.vars="DATE", measure.vars = colnames(results_nn_cinc_cagg_wide)[69:ncol(results_nn_cinc_cagg_wide)], value.name = "LMLOGOFIT_AGG", variable.name = "CDEC_ID")
+
+# make sure they go back into long format correctly, the dataframes should be the same length, they aren't but we can merge in by id and date
+nrow(results_nn_cinc_cagg_long) == nrow(results_nn_cagg)
+
+# put in results, merge in so that it's joined correctly
+results_nn_cinc_cagg_long$CDEC_ID_JOIN <- substr(results_nn_cinc_cagg_long$CDEC_ID, 1, 3)
+results_nn_cagg <- merge(results_nn_cagg, results_nn_cinc_cagg_long, by.x=c("DATE", "CDEC_ID"), by.y=c("DATE", "CDEC_ID_JOIN"))
+results_nn_cagg$LMLOGORES_AGG <- results_nn_cagg$LMLOGOFIT_AGG-results_nn_cagg$FLOW
+```
+
+Now everything is in agg and cagg! so use results_lm_agg, results_lm_cagg, results_glm_agg, results_glm_cagg, results_rf_agg, results_rf_cagg
+
+## 5.3 Cumulative Basins
+```{r post_processing_lm_logo_cagg}
+# use WATERYEAR to subset and de-accumulate the vector
+
+x <- y <- list() # for LMLOGOFIT non-accumulated vector
+for (i in unique(results_lm_cagg$CDEC_ID)){
+  subset <- results_lm_cagg[results_lm_cagg$CDEC_ID==i,]
+  # in case it's not ordered, order subset by date
+  subset <- subset[order(as.Date(subset$DATE, format="%Y-%m-%d")),]
+
+  # make empty vectors for LMLOGOFIT and LMLOGOFIT_AGG for each wateryear
+  lmlogofit_nonc_vect <- lmlogofit_agg_nonc_vect <- numeric()
+
+  for (j in unique(subset$WATERYEAR)){
+    subsubset <- subset[subset$WATERYEAR==j,]
+    
+    # for lmlogofit offset the vector then subtract
+    subsubset2 <- c(0, subsubset$LMLOGOFIT)[1:length(subsubset$LMLOGOFIT)]
+    lmlogofit_nonc <- subsubset$LMLOGOFIT - subsubset2
+    lmlogofit_nonc_vect <- c(lmlogofit_nonc_vect, lmlogofit_nonc)
+    
+    # for lmlogofit_agg offset the vector then subtract
+    subsubset3 <- c(0, subsubset$LMLOGOFIT_AGG)[1:length(subsubset$LMLOGOFIT_AGG)]
+    lmlogofit_agg_nonc <- subsubset$LMLOGOFIT_AGG - subsubset3
+    lmlogofit_agg_nonc_vect <- c(lmlogofit_agg_nonc_vect, lmlogofit_agg_nonc)
+  }
+  x[[i]] <- lmlogofit_nonc_vect
+  y[[i]] <- lmlogofit_agg_nonc_vect
+}
+
+LMLOGOFIT_NONC <- unlist(x)
+LMLOGOFIT_AGG_NONC <- unlist(y)
+
+# make sure the dataframes are in the same length, and put it back
+nrow(results_lm_cagg) == length(LMLOGOFIT_NONC)
+results_lm_cagg$LMLOGOFIT_NONC <- LMLOGOFIT_NONC
+results_lm_cagg$LMLOGOFIT_AGG_NONC <- LMLOGOFIT_AGG_NONC
+
+# for residuals we have to put it back into agg dataframes
+results_to_merge <- results_lm_cagg[ , c("DATE", "CDEC_ID", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC")]
+results_lm_agg <- merge(results_lm_agg, results_to_merge, by=c("DATE", "CDEC_ID"))
+results_lm_agg$LMLOGORES_NONC <- results_lm_agg$LMLOGOFIT_NONC - results_lm_agg$FLOW
+results_lm_agg$LMLOGORES_AGG_NONC <- results_lm_agg$LMLOGOFIT_AGG_NONC - results_lm_agg$FLOW
+```
+
+```{r post_processing_glm_logo_cagg}
+x <- y <- list() # for LMLOGOFIT non-accumulated vector
+for (i in unique(results_glm_cagg$CDEC_ID)){
+  subset <- results_glm_cagg[results_glm_cagg$CDEC_ID==i,]
+  # in case it's not ordered, order subset by date
+  subset <- subset[order(as.Date(subset$DATE, format="%Y-%m-%d")),]
+
+  # make empty vectors for LMLOGOFIT and LMLOGOFIT_AGG for each wateryear
+  glmlogofit_nonc_vect <- glmlogofit_agg_nonc_vect <- numeric()
+
+  for (j in unique(subset$WATERYEAR)){
+    subsubset <- subset[subset$WATERYEAR==j,]
+    
+    # for lmlogofit offset the vector then subtract
+    subsubset2 <- c(0, subsubset$LMLOGOFIT)[1:length(subsubset$LMLOGOFIT)]
+    glmlogofit_nonc <- subsubset$LMLOGOFIT - subsubset2
+    glmlogofit_nonc_vect <- c(glmlogofit_nonc_vect, glmlogofit_nonc)
+    
+    # for lmlogofit_agg offset the vector then subtract
+    subsubset3 <- c(0, subsubset$LMLOGOFIT_AGG)[1:length(subsubset$LMLOGOFIT_AGG)]
+    glmlogofit_agg_nonc <- subsubset$LMLOGOFIT_AGG - subsubset3
+    glmlogofit_agg_nonc_vect <- c(glmlogofit_agg_nonc_vect, glmlogofit_agg_nonc)
+  }
+  x[[i]] <- glmlogofit_nonc_vect
+  y[[i]] <- glmlogofit_agg_nonc_vect
+}
+
+LMLOGOFIT_NONC <- unlist(x)
+LMLOGOFIT_AGG_NONC <- unlist(y)
+
+# make sure the dataframes are in the same length, and put it back
+nrow(results_glm_cagg) == length(LMLOGOFIT_NONC)
+results_glm_cagg$LMLOGOFIT_NONC <- LMLOGOFIT_NONC
+results_glm_cagg$LMLOGOFIT_AGG_NONC <- LMLOGOFIT_AGG_NONC
+
+# for residuals we have to put it back into agg dataframes
+results_to_merge <- results_glm_cagg[ , c("DATE", "CDEC_ID", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC")]
+results_glm_agg <- merge(results_glm_agg, results_to_merge, by=c("DATE", "CDEC_ID"))
+results_glm_agg$LMLOGORES_NONC <- results_glm_agg$LMLOGOFIT_NONC - results_glm_agg$FLOW
+results_glm_agg$LMLOGORES_AGG_NONC <- results_glm_agg$LMLOGOFIT_AGG_NONC - results_glm_agg$FLOW
+```
+
+```{r post_processing_rf_logo_cagg}
+x <- y <- list() # for LMLOGOFIT non-accumulated vector
+for (i in unique(results_rf_cagg$CDEC_ID)){
+  subset <- results_rf_cagg[results_rf_cagg$CDEC_ID==i,]
+  # in case it's not ordered, order subset by date
+  subset <- subset[order(as.Date(subset$DATE, format="%Y-%m-%d")),]
+
+  # make empty vectors for LMLOGOFIT and LMLOGOFIT_AGG for each wateryear
+  rflogofit_nonc_vect <- rflogofit_agg_nonc_vect <- numeric()
+
+  for (j in unique(subset$WATERYEAR)){
+    subsubset <- subset[subset$WATERYEAR==j,]
+    
+    # for lmlogofit offset the vector then subtract
+    subsubset2 <- c(0, subsubset$LMLOGOFIT)[1:length(subsubset$LMLOGOFIT)]
+    rflogofit_nonc <- subsubset$LMLOGOFIT - subsubset2
+    rflogofit_nonc_vect <- c(rflogofit_nonc_vect, rflogofit_nonc)
+    
+    # for lmlogofit_agg offset the vector then subtract
+    subsubset3 <- c(0, subsubset$LMLOGOFIT_AGG)[1:length(subsubset$LMLOGOFIT_AGG)]
+    rflogofit_agg_nonc <- subsubset$LMLOGOFIT_AGG - subsubset3
+    rflogofit_agg_nonc_vect <- c(rflogofit_agg_nonc_vect, rflogofit_agg_nonc)
+  }
+  x[[i]] <- rflogofit_nonc_vect
+  y[[i]] <- rflogofit_agg_nonc_vect
+}
+
+LMLOGOFIT_NONC <- unlist(x)
+LMLOGOFIT_AGG_NONC <- unlist(y)
+
+# make sure the dataframes are in the same length, and put it back
+nrow(results_rf_cagg) == length(LMLOGOFIT_NONC)
+results_rf_cagg$LMLOGOFIT_NONC <- LMLOGOFIT_NONC
+results_rf_cagg$LMLOGOFIT_AGG_NONC <- LMLOGOFIT_AGG_NONC
+
+# for residuals we have to put it back into agg dataframes
+results_to_merge <- results_rf_cagg[ , c("DATE", "CDEC_ID", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC")]
+results_rf_agg <- merge(results_rf_agg, results_to_merge, by=c("DATE", "CDEC_ID"))
+results_rf_agg$LMLOGORES_NONC <- results_rf_agg$LMLOGOFIT_NONC - results_rf_agg$FLOW
+results_rf_agg$LMLOGORES_AGG_NONC <- results_rf_agg$LMLOGOFIT_AGG_NONC - results_rf_agg$FLOW
+```
+
+```{r post_processing_nn_logo_cagg}
+x <- y <- list() # for LMLOGOFIT non-accumulated vector
+for (i in unique(results_nn_cagg$CDEC_ID)){
+  subset <- results_nn_cagg[results_nn_cagg$CDEC_ID==i,]
+  # in case it's not ordered, order subset by date
+  subset <- subset[order(as.Date(subset$DATE, format="%Y-%m-%d")),]
+
+  # make empty vectors for LMLOGOFIT and LMLOGOFIT_AGG for each wateryear
+  nnlogofit_nonc_vect <- nnlogofit_agg_nonc_vect <- numeric()
+
+  for (j in unique(subset$WATERYEAR)){
+    subsubset <- subset[subset$WATERYEAR==j,]
+    
+    # for lmlogofit offset the vector then subtract
+    subsubset2 <- c(0, subsubset$LMLOGOFIT)[1:length(subsubset$LMLOGOFIT)]
+    nnlogofit_nonc <- subsubset$LMLOGOFIT - subsubset2
+    nnlogofit_nonc_vect <- c(nnlogofit_nonc_vect, nnlogofit_nonc)
+    
+    # for lmlogofit_agg offset the vector then subtract
+    subsubset3 <- c(0, subsubset$LMLOGOFIT_AGG)[1:length(subsubset$LMLOGOFIT_AGG)]
+    nnlogofit_agg_nonc <- subsubset$LMLOGOFIT_AGG - subsubset3
+    nnlogofit_agg_nonc_vect <- c(nnlogofit_agg_nonc_vect, nnlogofit_agg_nonc)
+  }
+  x[[i]] <- nnlogofit_nonc_vect
+  y[[i]] <- nnlogofit_agg_nonc_vect
+}
+
+LMLOGOFIT_NONC <- unlist(x)
+LMLOGOFIT_AGG_NONC <- unlist(y)
+
+# make sure the dataframes are in the same length, and put it back
+nrow(results_nn_cagg) == length(LMLOGOFIT_NONC)
+results_nn_cagg$LMLOGOFIT_NONC <- LMLOGOFIT_NONC
+results_nn_cagg$LMLOGOFIT_AGG_NONC <- LMLOGOFIT_AGG_NONC
+
+# for residuals we have to put it back into agg dataframes
+results_to_merge <- results_nn_cagg[ , c("DATE", "CDEC_ID", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC")]
+results_nn_agg <- merge(results_nn_agg, results_to_merge, by=c("DATE", "CDEC_ID"))
+results_nn_agg$LMLOGORES_NONC <- results_nn_agg$LMLOGOFIT_NONC - results_nn_agg$FLOW
+results_nn_agg$LMLOGORES_AGG_NONC <- results_nn_agg$LMLOGOFIT_AGG_NONC - results_nn_agg$FLOW
+```
+
+```{r results_cleanup} 
+# no longer needed 
+remove(n)
+remove(i)
+remove(j)
+remove(b)
+remove(b_ag)
+remove(basinabove1)
+remove(basinabove2)
+remove(basinabove3)
+remove(basinabove4)
+remove(subset)
+remove(subsubset)
+remove(subsubset2)
+remove(subsubset3)
+remove(x)
+remove(y)
+remove(LMLOGOFIT_NONC)
+remove(LMLOGOFIT_AGG_NONC)
+remove(lmlogofit_nonc)
+remove(lmlogofit_agg_nonc)
+remove(lmlogofit_nonc_vect)
+remove(lmlogofit_agg_nonc_vect)
+remove(glmlogofit_nonc)
+remove(glmlogofit_agg_nonc)
+remove(glmlogofit_nonc_vect)
+remove(glmlogofit_agg_nonc_vect)
+remove(rflogofit_nonc)
+remove(rflogofit_agg_nonc)
+remove(rflogofit_nonc_vect)
+remove(rflogofit_agg_nonc_vect)
+remove(nnlogofit_nonc)
+remove(nnlogofit_agg_nonc)
+remove(nnlogofit_nonc_vect)
+remove(nnlogofit_agg_nonc_vect)
+
+# make new data frame with all results to use from here on!
+results_lm <- results_lm_agg
+results_glm <- results_glm_agg
+results_rf <- results_rf_agg
+results_nn <- results_nn_agg
+
+# merge lm and glm in case needed for comparison plots 
+colnames(results_glm_agg)[43:51] <- c("GLMLOGOFIT", "GLMLOGORES", "CDEC_ID.y", "GLMLOGOFIT_AGG", "GLMLOGORES_AGG", "GLMLOGOFIT_NONC", "GLMLOGOFIT_AGG_NONC", "GLMLOGORES_NONC", "GLMLOGORES_AGG_NONC")
+colnames(results_rf_agg)[43:51] <- c("RFLOGOFIT", "RFLOGORES", "CDEC_ID.y", "RFLOGOFIT_AGG", "RFLOGORES_AGG", "RFLOGOFIT_NONC", "RFLOGOFIT_AGG_NONC", "RFLOGORES_NONC", "RFLOGORES_AGG_NONC")
+colnames(results_nn_agg)[43:51] <- c("NNLOGOFIT", "NNLOGORES", "CDEC_ID.y", "NNLOGOFIT_AGG", "NNLOGORES_AGG", "NNLOGOFIT_NONC", "NNLOGOFIT_AGG_NONC", "NNLOGORES_NONC", "NNLOGORES_AGG_NONC")
+
+results_all <- merge(results_lm, results_glm_agg[, c("DATE", "CDEC_ID", "GLMLOGOFIT", "GLMLOGORES", "GLMLOGOFIT_AGG", "GLMLOGORES_AGG", "GLMLOGOFIT_NONC", "GLMLOGOFIT_AGG_NONC", "GLMLOGORES_NONC", "GLMLOGORES_AGG_NONC" )], by=c("DATE", "CDEC_ID"))
+results_all <- merge(results_all, results_rf_agg[, c("DATE", "CDEC_ID", "RFLOGOFIT", "RFLOGORES", "RFLOGOFIT_AGG", "RFLOGORES_AGG", "RFLOGOFIT_NONC", "RFLOGOFIT_AGG_NONC", "RFLOGORES_NONC", "RFLOGORES_AGG_NONC" )], by=c("DATE", "CDEC_ID"))
+results_all <- merge(results_all, results_nn_agg[, c("DATE", "CDEC_ID", "NNLOGOFIT", "NNLOGORES", "NNLOGOFIT_AGG", "NNLOGORES_AGG", "NNLOGOFIT_NONC", "NNLOGOFIT_AGG_NONC", "NNLOGORES_NONC", "NNLOGORES_AGG_NONC" )], by=c("DATE", "CDEC_ID"))
+
+# number of observations for each CDEC_ID in the two datasets
+aggregate(FLOW ~ CDEC_ID, data = results_lm, FUN = length)
+aggregate(FLOW ~ CDEC_ID, data = results_glm, FUN = length)
+aggregate(FLOW ~ CDEC_ID, data = results_rf, FUN = length)
+aggregate(FLOW ~ CDEC_ID, data = results_nn, FUN = length)
+```
+Now everything is in agg! so use results_lm, results_glm, results_rf, and results_nn for analysis and plots. 
+
+Note how we are not removing the epsilon (=1 AF) that we added to the FLOW for the glm modeling. It's just too small to worry about.  
+
+# 6.0 Test & Analyze
+There are four things we are looking for when analyzing residuals:
+* The mean of the errors is zero (and the sum of the errors is zero)
+* The distribution of the errors are normal.
+* All of the errors are independent.
+* Variance of errors is constant (Homoscedastic)
+
+```{r lm_tests}
+lmanalysistests <- function(lmmodel){
+  library(fBasics)
+  # residuals are normally distributed? test residuals for normality; null hypothesis: Skewness and Kurtosis are equal to zero
+  jb <- jarqueberaTest(lmmodel$resid) 
+  
+  library(lmtest)
+  # residuals are independent? dwtest; test for independence of residuals; null hypothesis: Errors are serially uncorrelated
+  dw <- dwtest(lmmodel)
+  
+  # return both
+  list(jb=jb, dw=dw)
+}
+
+# lapply(lm_agg_logo_results$mod, lmanalysistests)
+# lapply(lm_agg_logo_results$mod, lmanalysistests)
+# lapply(lm_inc_logo_results$mod, lmanalysistests)
+# lapply(lm_cagg_logo_results$mod, lmanalysistests)
+# lapply(lm_cinc_logo_results$mod, lmanalysistests)
+# # seems like in all of them alternative hypothesis holds: non-normal residuals and true autocorrelation is greater than 0
+```
+
+```{r lm_analysis_plots}
+# datatype can be: "agg", "inc", "cagg", "cinc"
+# modeltype can be: "lm", "glm", "rf", "nn"
+
+lmanalysisplots <- function(resultsdf, datatype, modeltype){
+  resultsdf_ordered <- resultsdf[order(resultsdf$FLOW),]
+  # get the columns of interest
+  if(datatype=="agg"){
+    res_of_interest <- resultsdf_ordered$LMLOGORES
+    fit_of_interest <- resultsdf_ordered$LMLOGOFIT
+  } else if(datatype=="inc"){
+    res_of_interest <- resultsdf_ordered$LMLOGORES_AGG
+    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_AGG    
+  } else if(datatype=="cagg"){
+    res_of_interest <- resultsdf_ordered$LMLOGORES_NONC
+    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_NONC    
+  } else { # for datatype=="cinc" case
+    res_of_interest <- resultsdf_ordered$LMLOGORES_AGG_NONC
+    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_AGG_NONC   
+  }
+  
+  # 1st plot: residuals v response
+  png(paste0('ch2 data transformations/outputdata/rplot21_', modeltype, 'logo_residvresp_', datatype, '.png'), width=6.5, height=3, units="in", pointsize=8, res=1200)
+  
+  plot(res_of_interest ~ resultsdf_ordered$FLOW, xlab="Unimpaired Flow (AF/m)", ylab="Residuals (AF/m)") # ylim=c(-1.5e7, 6e6), xlim=c(0, 2e7)
+  abline(h=0,lty=2, col=cbpblack[6])
+  dev.off()
+  
+  # 2nd plot: residuals over time
+  png(paste0('ch2 data transformations/outputdata/rplot22_', modeltype, 'logo_residovertime_', datatype, '.png'), width=6.5, height=3, units="in", pointsize=8, res=1200)
+  plot(resultsdf$DATE, res_of_interest, xlab="",ylab="Residuals (AF/m)", xaxt = "n") #, ylim=c(-1.5e7, 6e6)
+  labDates <- seq(min(resultsdf$DATE), max(resultsdf$DATE), by = "12 months")
+  axis.Date(side = 1, resultsdf$DATE, at = labDates, format = "%b %y", las = 2)
+  abline(h=0,lty=2, col=cbpblack[6])
+  dev.off()
+  
+  # 3rd plot: histogram of residuals
+  png(paste0('ch2 data transformations/outputdata/rplot23_', modeltype, 'logo_histofresid_', datatype, '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  hist(res_of_interest, ylab="Frequency", xlab="Residuals (AF/m)", main="") #main="Histogram of Residuals" #, ylim=c(0,1e4)
+  abline(v=0,lty=2, col=cbpblack[6])
+  dev.off()
+  
+  # 4th plot: q-q plot
+  png(paste0('ch2 data transformations/outputdata/rplot24_', modeltype, 'logo_qq_', datatype, '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  qqnorm(res_of_interest, main="") # main="Normal Q-Q Plot" #, ylim=c(-1.5e7, 6e6)
+  qqline(res_of_interest, col=cbpblack[6], lty=2)
+  dev.off()
+  
+  # # 5th plot: studentized residuals
+  # png(paste0('outputdata/rplot25_', modeltype, 'logo_studentizedresiduals_', datatype, '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  # plot(fit_of_interest, rstudent(lmmodel), main="Studentized Residuals vs. Predictions", xlab="Predictions (acre-feet/month)", ylab="Studentized Residuals (-)", ylim=c(-25,25))
+  # #xlim=c(-1e6, 5e6)
+  # abline(h=0, lty=2, col=cbpblack[6])
+  # dev.off()
+}
+
+lmanalysisplots(results_lm, "agg", "lm")
+lmanalysisplots(results_lm, "cagg", "lm")
+lmanalysisplots(results_lm, "inc", "lm")
+lmanalysisplots(results_lm, "cinc", "lm")
+
+lmanalysisplots(results_glm, "agg", "glm")
+lmanalysisplots(results_glm, "cagg", "glm")
+lmanalysisplots(results_glm, "inc", "glm")
+lmanalysisplots(results_glm, "cinc", "glm")
+
+lmanalysisplots(results_rf, "agg", "rf")
+lmanalysisplots(results_rf, "cagg", "rf")
+lmanalysisplots(results_rf, "inc", "rf")
+lmanalysisplots(results_rf, "cinc", "rf")
+
+lmanalysisplots(results_nn, "agg", "nn")
+lmanalysisplots(results_nn, "cagg", "nn")
+lmanalysisplots(results_nn, "inc", "nn")
+lmanalysisplots(results_nn, "cinc", "nn")
+```
+
+# 7.0 Visual Fit
+```{r timeseries_plots}
+# datatype can be: "agg", "inc", "cagg", "cinc"
+# modelform can be: "lm", "glm", "rf", "nn"
+
+library(reshape2)
+library(ggplot2)
+tsresultsplots <- function(resultsdf, datatype, modelform){   
+  for (r in 1:(length(unique(resultsdf$CDEC_ID)))){ 
+    # plot time series by basin
+    h <- unique(resultsdf$CDEC_ID)[r]
+    resultsdf_sub <- resultsdf[resultsdf$CDEC_ID==h,]
+    
+    # convert the units. AREASQKM is in square kilometer, PPT is in mm/month, FLOW is in AF/month 
+    watershedArea_sqft <- resultsdf_sub$AREASQM[1]*(1000*100/2.54/12)^2
+    resultsdf_sub$precip_ft <- resultsdf_sub$PPT/10/2.54/12
+    resultsdf_sub$precip_cuft <- resultsdf_sub$precip_ft * watershedArea_sqft
+    resultsdf_sub$precip_cfs <- resultsdf_sub$precip_cuft/30.5/24/60/60
+    resultsdf_sub$discharge_cfs <- resultsdf_sub$FLOW*0.01656433739228
+    
+    # get the columns of interest
+    if(datatype=="agg"){
+      res_of_interest <- resultsdf_sub$LMLOGORES
+      fit_of_interest <- resultsdf_sub$LMLOGOFIT
+    } else if(datatype=="inc"){
+      res_of_interest <- resultsdf_sub$LMLOGORES_AGG
+      fit_of_interest <- resultsdf_sub$LMLOGOFIT_AGG    
+    } else if(datatype=="cagg"){
+      res_of_interest <- resultsdf_sub$LMLOGORES_NONC
+      fit_of_interest <- resultsdf_sub$LMLOGOFIT_NONC    
+    } else { # for datatype=="cinc" case
+      res_of_interest <- resultsdf_sub$LMLOGORES_AGG_NONC
+      fit_of_interest <- resultsdf_sub$LMLOGOFIT_AGG_NONC   
+    }
+    
+    # now convert the units
+    resultsdf_sub$discharge_fit_cfs <- fit_of_interest*0.01656433739228
+    
+    # remove NAs here?
+    resultsdf_sub <- na.omit(resultsdf_sub)
+    
+    # calculate the range needed to avoid having your hyetograph and hydrograph overlap 
+    maxRange <- 1.1*(max(resultsdf_sub$precip_cfs) + max(max(resultsdf_sub$discharge_cfs), max(resultsdf_sub$discharge_fit_cfs, na.rm=TRUE)))
+  
+    # create a function to backtransform the axis labels for precipitation, for some reason multiplying it by -1 fixed the labels, kinda hacky but whatever
+    precip_labels <- function(x) {round((-1*x / watershedArea_sqft) * 12 *30.5*24*60*60, 0)} # labels in inches/month
+    
+    # melt for ggplot dataframe
+    results_sub_melted <- melt(resultsdf_sub[, c("DATE", "discharge_cfs", "discharge_fit_cfs" )], id.var='DATE')
+    
+    # make the plot
+    hydrograph <- ggplot(data = results_sub_melted, 
+                         aes(x = DATE, y=value, col=variable)) + 
+      xlab("")  + 
+      ggtitle(paste0('Basin CDEC ID: ', h)) +
+      
+      # use geom_tile to create the inverted hyetograph. geom_tile has a bug that displays a warning message for height and width, you can ignore it.
+      geom_tile(data=resultsdf_sub, aes(y = -1*(precip_cfs/2-maxRange), # y = the center point of each bar
+                height = precip_cfs,
+                width = 2),
+                fill = cbpblack[6],
+                color = cbpblack[6]) +
+    
+      # plot your discharge data
+      geom_line() +
+      scale_colour_manual("legend:", values = cbpblack[c(1,3)], labels=c("observed", "predicted")) +
+      # scale_linetype_manual("legend:", values = c("solid", "dashed")) +
+      theme(legend.position="bottom", legend.title = element_blank()) +
+    
+      # create a second axis with sec_axis() and format the labels to display the original precipitation units
+      scale_y_continuous(name = "Discharge (cfs)", sec.axis = sec_axis(trans = ~1*(.-maxRange), name = "Precipitation (in/m)", labels = precip_labels)) # labels are in inches/s
+    
+    png(paste0('ch2 data transformations/outputdata/timeseries_', modelform, "_", datatype, '/timeseries_', h, '.png'), width=12, height=3.5, units="in", pointsize=12, res=1200)
+    par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+    print(hydrograph)
+    dev.off()
+  }
+}
+
+tsresultsplots(results_lm, "agg", "lm")
+tsresultsplots(results_lm, "inc", "lm")
+tsresultsplots(results_lm, "cagg", "lm")
+tsresultsplots(results_lm, "cinc", "lm")
+
+tsresultsplots(results_glm, "agg", "glm")
+tsresultsplots(results_glm, "inc", "glm")
+tsresultsplots(results_glm, "cagg", "glm")
+tsresultsplots(results_glm, "cinc", "glm")
+
+tsresultsplots(results_rf, "agg", "rf")
+tsresultsplots(results_rf, "cagg", "rf")
+tsresultsplots(results_rf, "inc", "rf")
+tsresultsplots(results_rf, "cinc", "rf")
+
+tsresultsplots(results_nn, "agg", "nn")
+tsresultsplots(results_nn, "cagg", "nn")
+tsresultsplots(results_nn, "inc", "nn")
+tsresultsplots(results_nn, "cinc", "nn")
+```
+
+Need to modify these to accommodate the RF and NN
+```{r tsplots_comp}
+for (r in 1:(length(unique(results_all$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(results_all$CDEC_ID)[r]
+  resultsdf_sub <- results_all[results_all$CDEC_ID==h,]
+  
+  # convert the units. AREASQKM is in square kilometer, PPT is in mm/month, FLOW is in AF/month 
+  watershedArea_sqft <- resultsdf_sub$AREASQM[1]*(1000*100/2.54/12)^2
+  resultsdf_sub$precip_ft <- resultsdf_sub$PPT/10/2.54/12
+  resultsdf_sub$precip_cuft <- resultsdf_sub$precip_ft * watershedArea_sqft
+  resultsdf_sub$precip_cfs <- resultsdf_sub$precip_cuft/30.5/24/60/60
+  resultsdf_sub$discharge_cfs <- resultsdf_sub$FLOW*0.01656433739228
+  
+  resultsdf_sub$LMLOGOFIT_cfs <- resultsdf_sub$LMLOGOFIT*0.01656433739228
+  resultsdf_sub$LMLOGOFIT_AGG_cfs <- resultsdf_sub$LMLOGOFIT_AGG*0.01656433739228
+  resultsdf_sub$LMLOGOFIT_NONC_cfs <- resultsdf_sub$LMLOGOFIT_NONC*0.01656433739228
+  resultsdf_sub$LMLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$LMLOGOFIT_AGG_NONC*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_cfs <- resultsdf_sub$GLMLOGOFIT*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_AGG_cfs <- resultsdf_sub$GLMLOGOFIT_AGG*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_NONC_cfs <- resultsdf_sub$GLMLOGOFIT_NONC*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$GLMLOGOFIT_AGG_NONC*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_cfs <- resultsdf_sub$RFLOGOFIT*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_AGG_cfs <- resultsdf_sub$RFLOGOFIT_AGG*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_NONC_cfs <- resultsdf_sub$RFLOGOFIT_NONC*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$RFLOGOFIT_AGG_NONC*0.01656433739228
+
+  # remove NAs here?
+  resultsdf_sub <- na.omit(resultsdf_sub)
+  
+  # calculate the range needed to avoid having your hyetograph and hydrograph overlap 
+  maxFlow <- max(max(resultsdf_sub$discharge_cfs), 
+                 max(resultsdf_sub$LMLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$LMLOGOFIT_AGG_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$LMLOGOFIT_NONC_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$LMLOGOFIT_AGG_NONC_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_AGG_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_NONC_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_AGG_NONC_cfs, na.rm=TRUE),
+                 max(resultsdf_sub$RFLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$RFLOGOFIT_AGG_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$RFLOGOFIT_NONC_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$RFLOGOFIT_AGG_NONC_cfs, na.rm=TRUE))
+  maxRange <- 1.1*(max(resultsdf_sub$precip_cfs) + maxFlow)
+
+  # create a function to backtransform the axis labels for precipitation, for some reason multiplying it by -1 fixed the labels, kinda hacky but whatever
+  precip_labels <- function(x) {round((-1*x/watershedArea_sqft)*12*30.5*24*60*60, 0)} # labels in inches/month
+  
+  # melt for ggplot dataframe
+  results_sub_melted <- melt(resultsdf_sub[, c("DATE", "discharge_cfs", "LMLOGOFIT_cfs", "LMLOGOFIT_AGG_cfs", "LMLOGOFIT_NONC_cfs", "LMLOGOFIT_AGG_NONC_cfs", "GLMLOGOFIT_cfs", "GLMLOGOFIT_AGG_cfs", "GLMLOGOFIT_NONC_cfs", "GLMLOGOFIT_AGG_NONC_cfs", "RFLOGOFIT_cfs", "RFLOGOFIT_AGG_cfs", "RFLOGOFIT_NONC_cfs", "RFLOGOFIT_AGG_NONC_cfs")], id.var='DATE')
+  
+  # make the plot
+  hydrograph <- ggplot(data = results_sub_melted, 
+                       aes(x = DATE, y=value, col=variable)) + 
+    xlab("")  + 
+    ggtitle(paste0('Basin CDEC ID: ', h)) +
+    
+    # use geom_tile to create the inverted hyetograph. geom_tile has a bug that displays a warning message for height and width, you can ignore it.
+    geom_tile(data=resultsdf_sub, aes(y = -1*(precip_cfs/2-maxRange), # y = the center point of each bar
+              height = precip_cfs,
+              width = 2),
+              fill = cbpblack[6],
+              color = cbpblack[6]) +
+  
+    # plot your discharge data
+    geom_line() +
+    scale_colour_manual("legend:", values = c(cbpblack, cbpgrey[1], "red", "green", "blue", "goldenrod"), labels=c("Obs", "LM Agg", "LM Inc", "LM Cagg", "LM Cinc", "GLM Agg", "GLM Inc", "GLM Cagg", "GLM Cinc", "RF Agg", "RF Inc", "RF Cagg", "RF Cinc")) +
+    theme(legend.position="bottom", legend.title = element_blank()) +
+  
+    # create a second axis with sec_axis() and format the labels to display the original precipitation units
+    scale_y_continuous(name = "Discharge (cfs)", sec.axis = sec_axis(trans = ~1*(.-maxRange), name = "Precipitation (in/m)", labels = precip_labels)) # labels are in inches/s
+  
+  png(paste0('ch2 data transformations/outputdata/timeseries_all/timeseries_', h, '.png'), width=6.5, height=3.5, units="in", pointsize=12, res=1200)
+  par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+  print(hydrograph)
+  dev.off()
+}
+```
+
+```{r tsplots_comp2}
+for (r in 1:(length(unique(results_all$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(results_all$CDEC_ID)[r]
+  resultsdf_sub <- results_all[results_all$CDEC_ID==h,]
+  
+  # convert the units. AREASQKM is in square kilometer, PPT is in mm/month, FLOW is in AF/month 
+  watershedArea_sqft <- resultsdf_sub$AREASQM[1]*(1000*100/2.54/12)^2
+  resultsdf_sub$precip_ft <- resultsdf_sub$PPT/10/2.54/12
+  resultsdf_sub$precip_cuft <- resultsdf_sub$precip_ft * watershedArea_sqft
+  resultsdf_sub$precip_cfs <- resultsdf_sub$precip_cuft/30.5/24/60/60
+  resultsdf_sub$discharge_cfs <- resultsdf_sub$FLOW*0.01656433739228
+  
+  resultsdf_sub$LMLOGOFIT_cfs <- resultsdf_sub$LMLOGOFIT*0.01656433739228
+  resultsdf_sub$LMLOGOFIT_AGG_cfs <- resultsdf_sub$LMLOGOFIT_AGG*0.01656433739228
+  # resultsdf_sub$LMLOGOFIT_NONC_cfs <- resultsdf_sub$LMLOGOFIT_NONC*0.01656433739228
+  # resultsdf_sub$LMLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$LMLOGOFIT_AGG_NONC*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_cfs <- resultsdf_sub$GLMLOGOFIT*0.01656433739228
+  resultsdf_sub$GLMLOGOFIT_AGG_cfs <- resultsdf_sub$GLMLOGOFIT_AGG*0.01656433739228
+  # resultsdf_sub$GLMLOGOFIT_NONC_cfs <- resultsdf_sub$GLMLOGOFIT_NONC*0.01656433739228
+  # resultsdf_sub$GLMLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$GLMLOGOFIT_AGG_NONC*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_cfs <- resultsdf_sub$RFLOGOFIT*0.01656433739228
+  resultsdf_sub$RFLOGOFIT_AGG_cfs <- resultsdf_sub$RFLOGOFIT_AGG*0.01656433739228
+  # resultsdf_sub$RFLOGOFIT_NONC_cfs <- resultsdf_sub$RFLOGOFIT_NONC*0.01656433739228
+  # resultsdf_sub$RFLOGOFIT_AGG_NONC_cfs <- resultsdf_sub$RFLOGOFIT_AGG_NONC*0.01656433739228
+  
+  # remove NAs here?
+  resultsdf_sub <- na.omit(resultsdf_sub)
+  
+  # calculate the range needed to avoid having your hyetograph and hydrograph overlap 
+  maxFlow <- max(max(resultsdf_sub$discharge_cfs), 
+                 max(resultsdf_sub$LMLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$LMLOGOFIT_AGG_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$GLMLOGOFIT_AGG_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$RFLOGOFIT_cfs, na.rm=TRUE), 
+                 max(resultsdf_sub$RFLOGOFIT_AGG_cfs, na.rm=TRUE))
+  maxRange <- 1.1*(max(resultsdf_sub$precip_cfs) + maxFlow)
+
+  # create a function to backtransform the axis labels for precipitation, for some reason multiplying it by -1 fixed the labels, kinda hacky but whatever
+  precip_labels <- function(x) {round((-1*x/watershedArea_sqft)*12*30.5*24*60*60, 0)} # labels in inches/month
+  
+  # melt for ggplot dataframe
+  results_sub_melted <- melt(resultsdf_sub[, c("DATE", "discharge_cfs", "LMLOGOFIT_cfs", "LMLOGOFIT_AGG_cfs", "GLMLOGOFIT_cfs", "GLMLOGOFIT_AGG_cfs", "RFLOGOFIT_cfs", "RFLOGOFIT_AGG_cfs")], id.var='DATE')
+  
+  # make the plot
+  hydrograph <- ggplot(data = results_sub_melted, 
+                       aes(x = DATE, y=value, col=variable)) + 
+    xlab("")  + 
+    ggtitle(paste0('Basin CDEC ID: ', h)) +
+    
+    # use geom_tile to create the inverted hyetograph. geom_tile has a bug that displays a warning message for height and width, you can ignore it.
+    geom_tile(data=resultsdf_sub, aes(y = -1*(precip_cfs/2-maxRange), # y = the center point of each bar
+              height = precip_cfs,
+              width = 2),
+              fill = cbpblack[6],
+              color = cbpblack[6]) +
+  
+    # plot your discharge data
+    geom_line() +
+    scale_colour_manual("legend:", values = c(cbpblack[1:7]), labels=c("Obs", "LM Agg", "LM Inc", "GLM Agg", "GLM Inc", "RF Agg", "RF Inc")) +
+    theme(legend.position="bottom", legend.title = element_blank()) +
+  
+    # create a second axis with sec_axis() and format the labels to display the original precipitation units
+    scale_y_continuous(name = "Discharge (cfs)", sec.axis = sec_axis(trans = ~1*(.-maxRange), name = "Precipitation (in/m)", labels = precip_labels)) # labels are in inches/s
+  
+  png(paste0('ch2 data transformations/outputdata/timeseries_some/timeseries_', h, '.png'), width=6.5, height=3.5, units="in", pointsize=12, res=1200)
+  par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+  print(hydrograph)
+  dev.off()
+}
+```
+
+# 8.0 Goodness of Fit 
+```{r mof_lm_glm}
+gof_lm_agg <- gof(results_lm$LMLOGOFIT, results_lm$FLOW, na.rm=TRUE)
+gof_lm_inc <- gof(results_lm$LMLOGOFIT_AGG, results_lm$FLOW, na.rm=TRUE)
+gof_lm_cagg <- gof(results_lm$LMLOGOFIT_NONC, results_lm$FLOW, na.rm=TRUE)
+gof_lm_cinc <- gof(results_lm$LMLOGOFIT_AGG_NONC, results_lm$FLOW, na.rm=TRUE)
+
+gof_glm_agg <- gof(results_glm$LMLOGOFIT, results_glm$FLOW, na.rm=TRUE)
+gof_glm_inc <- gof(results_glm$LMLOGOFIT_AGG, results_glm$FLOW, na.rm=TRUE)
+gof_glm_cagg <- gof(results_glm$LMLOGOFIT_NONC, results_glm$FLOW, na.rm=TRUE)
+gof_glm_cinc <- gof(results_glm$LMLOGOFIT_AGG_NONC, results_glm$FLOW, na.rm=TRUE)
+
+gof_rf_agg <- gof(results_rf$LMLOGOFIT, results_rf$FLOW, na.rm=TRUE)
+gof_rf_inc <- gof(results_rf$LMLOGOFIT_AGG, results_rf$FLOW, na.rm=TRUE)
+gof_rf_cagg <- gof(results_rf$LMLOGOFIT_NONC, results_rf$FLOW, na.rm=TRUE)
+gof_rf_cinc <- gof(results_rf$LMLOGOFIT_AGG_NONC, results_rf$FLOW, na.rm=TRUE)
+
+gof_nn_agg <- gof(results_nn$LMLOGOFIT, results_nn$FLOW, na.rm=TRUE)
+gof_nn_inc <- gof(results_nn$LMLOGOFIT_AGG, results_nn$FLOW, na.rm=TRUE)
+gof_nn_cagg <- gof(results_nn$LMLOGOFIT_NONC, results_nn$FLOW, na.rm=TRUE)
+gof_nn_cinc <- gof(results_nn$LMLOGOFIT_AGG_NONC, results_nn$FLOW, na.rm=TRUE)
+
+gof_lm <- cbind(gof_lm_agg, gof_lm_inc, gof_lm_cagg, gof_lm_cinc)
+gof_glm <- cbind(gof_glm_agg, gof_glm_inc, gof_glm_cagg, gof_glm_cinc)
+gof_rf <- cbind(gof_rf_agg, gof_rf_inc, gof_rf_cagg, gof_rf_cinc)
+gof_nn <- cbind(gof_nn_agg, gof_nn_inc, gof_nn_cagg, gof_nn_cinc)
+
+colnames(gof_lm) <- c("LM_AGG", "LM_INC", "LM_CAGG", "LM_CINC")
+colnames(gof_glm) <- c("GLM_AGG", "GLM_INC", "GLM_CAGG", "GLM_CINC")
+colnames(gof_rf) <- c("RF_AGG", "RF_INC", "RF_CAGG", "RF_CINC")
+colnames(gof_nn) <- c("NN_AGG", "NN_INC", "NN_CAGG", "NN_CINC")
+
+gof_all <- as.data.frame(cbind(gof_lm, gof_glm, gof_rf, gof_nn))
+
+library(Hmisc)
+var_labels <- c("LM Agg", "LM Inc", "LM Cumul Agg", "LM Cumul Inc", "GLM Agg", "GLM Inc", "GLM Cumul Agg", "GLM Cumul Inc", "RF Agg", "RF Inc", "RF Cumul Agg", "RF Cumul Inc", "NN Agg", "NN Inc", "NN Cumul Agg", "NN Cumul Inc") 
+names(var_labels) <- colnames(gof_all)
+Hmisc::label(gof_all) <- lapply(names(var_labels), function(x) Hmisc::label(gof_all[,x]) = var_labels[x])
+
+# for latex documents, put this in appendix
+library(xtable)
+xtable(data.frame(gof_all))
+```
+
+```{r mof_lm_glm_rf_nn_bybasin}
+# for plotting purposes, just do this for lm inc because it was the best model! did it for lm agg too, for purposes of comparison later. 
+
+# for lm
+gof_lm_agg <- gof_lm_inc <- gof_lm_cagg <- gof_lm_cinc <- list()
+for (r in 1:(length(unique(results_lm$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(results_lm$CDEC_ID)[r]
+  resultsdf_sub <- results_lm[results_lm$CDEC_ID==h,]
+  gof_lm_agg[[r]] <- gof(resultsdf_sub$LMLOGOFIT, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_lm_inc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_lm_cagg[[r]] <- gof(resultsdf_sub$LMLOGOFIT_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_lm_cinc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+}
+
+names_tbd <- rownames(gof_lm_agg[[1]])
+gof_lm_agg_by_basins <- data.frame(matrix(unlist(gof_lm_agg), nrow=length(gof_lm_agg[[1]]), byrow=FALSE))
+rownames(gof_lm_agg_by_basins) <- names_tbd
+colnames(gof_lm_agg_by_basins) <- unique(results_lm$CDEC_ID)
+remove(names_tbd)
+
+names_tbd <- rownames(gof_lm_inc[[1]])
+gof_lm_inc_by_basins <- data.frame(matrix(unlist(gof_lm_inc), nrow=length(gof_lm_inc[[1]]), byrow=FALSE))
+rownames(gof_lm_inc_by_basins) <- names_tbd
+colnames(gof_lm_inc_by_basins) <- unique(results_lm$CDEC_ID)
+remove(names_tbd)
+
+# for glm
+gof_glm_agg <- gof_glm_inc <- gof_glm_cagg <- gof_glm_cinc <- list()
+for (r in 1:(length(unique(results_glm$CDEC_ID)))){
+  # plot time series by basin
+  h <- unique(results_glm$CDEC_ID)[r]
+  resultsdf_sub <- results_glm[results_glm$CDEC_ID==h,]
+  gof_glm_agg[[r]] <- gof(resultsdf_sub$LMLOGOFIT, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_glm_inc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_glm_cagg[[r]] <- gof(resultsdf_sub$LMLOGOFIT_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_glm_cinc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+}
+
+names_tbd <- rownames(gof_glm_agg[[1]])
+gof_glm_agg_by_basins <- data.frame(matrix(unlist(gof_glm_agg), nrow=length(gof_glm_agg[[1]]), byrow=FALSE))
+rownames(gof_glm_agg_by_basins) <- names_tbd
+colnames(gof_glm_agg_by_basins) <- unique(results_glm$CDEC_ID)
+remove(names_tbd)
+
+names_tbd <- rownames(gof_glm_inc[[1]])
+gof_glm_inc_by_basins <- data.frame(matrix(unlist(gof_glm_inc), nrow=length(gof_glm_inc[[1]]), byrow=FALSE))
+rownames(gof_glm_inc_by_basins) <- names_tbd
+colnames(gof_glm_inc_by_basins) <- unique(results_glm$CDEC_ID)
+remove(names_tbd)
+
+# for rf
+gof_rf_agg <- gof_rf_inc <- gof_rf_cagg <- gof_rf_cinc <- list()
+for (r in 1:(length(unique(results_rf$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(results_rf$CDEC_ID)[r]
+  resultsdf_sub <- results_rf[results_rf$CDEC_ID==h,]
+  gof_rf_agg[[r]] <- gof(resultsdf_sub$LMLOGOFIT, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_rf_inc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_rf_cagg[[r]] <- gof(resultsdf_sub$LMLOGOFIT_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_rf_cinc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+}
+
+names_tbd <- rownames(gof_rf_agg[[1]])
+gof_rf_agg_by_basins <- data.frame(matrix(unlist(gof_rf_agg), nrow=length(gof_rf_agg[[1]]), byrow=FALSE))
+rownames(gof_rf_agg_by_basins) <- names_tbd
+colnames(gof_rf_agg_by_basins) <- unique(results_rf$CDEC_ID)
+remove(names_tbd)
+
+names_tbd <- rownames(gof_rf_inc[[1]])
+gof_rf_inc_by_basins <- data.frame(matrix(unlist(gof_rf_inc), nrow=length(gof_rf_inc[[1]]), byrow=FALSE))
+rownames(gof_rf_inc_by_basins) <- names_tbd
+colnames(gof_rf_inc_by_basins) <- unique(results_rf$CDEC_ID)
+remove(names_tbd)
+
+# for nn
+gof_nn_agg <- gof_nn_inc <- gof_nn_cagg <- gof_nn_cinc <- list()
+for (r in 1:(length(unique(results_nn$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(results_nn$CDEC_ID)[r]
+  resultsdf_sub <- results_nn[results_nn$CDEC_ID==h,]
+  gof_nn_agg[[r]] <- gof(resultsdf_sub$LMLOGOFIT, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_nn_inc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_nn_cagg[[r]] <- gof(resultsdf_sub$LMLOGOFIT_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+  gof_nn_cinc[[r]] <- gof(resultsdf_sub$LMLOGOFIT_AGG_NONC, resultsdf_sub$FLOW, na.rm=TRUE)
+}
+
+names_tbd <- rownames(gof_nn_agg[[1]])
+gof_nn_agg_by_basins <- data.frame(matrix(unlist(gof_nn_agg), nrow=length(gof_nn_agg[[1]]), byrow=FALSE))
+rownames(gof_nn_agg_by_basins) <- names_tbd
+colnames(gof_nn_agg_by_basins) <- unique(results_nn$CDEC_ID)
+remove(names_tbd)
+
+names_tbd <- rownames(gof_nn_inc[[1]])
+gof_nn_inc_by_basins <- data.frame(matrix(unlist(gof_nn_inc), nrow=length(gof_nn_inc[[1]]), byrow=FALSE))
+rownames(gof_nn_inc_by_basins) <- names_tbd
+colnames(gof_nn_inc_by_basins) <- unique(results_nn$CDEC_ID)
+remove(names_tbd)
+```
+
+```{r mof_comp_plots}
+# plot this table especially for the important errors: RMSE, bR2, NSE, KGE, VE 
+# goftablet <- data.frame(t(gof_all))
+
+# remove the cumulative ones, cause they are so bad
+goftablet <- data.frame(t(gof_all[, c("LM_AGG", "LM_INC", "GLM_AGG", "GLM_INC", "RF_AGG", "RF_INC", "NN_AGG", "NN_INC")]))
+
+png('ch2 data transformations/outputdata/rplot26_gof_MSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$MSE, decreasing = TRUE),]
+  dotchart(goftablet$MSE, label=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Mean Squared Error (AF^2)", pch=19, xlim=c(min(goftablet$MSE), 1.1*max(goftablet$MSE)))
+  text(x=goftablet$MSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$MSE, digits=3, scientific=TRUE), pos=4, cex=1)
+dev.off()
+
+png('ch2 data transformations/outputdata/rplot26_gof_RMSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$RMSE, decreasing = TRUE),]
+  dotchart(goftablet$RMSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Root Mean Squared Erro (AF)", pch=19, xlim=c(min(goftablet$RMSE), 1.1*max(goftablet$RMSE)))
+  text(x=goftablet$RMSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$RMSE, digits=3, scientific=TRUE), pos=4, cex=1)
+dev.off()
+
+png('ch2 data transformations/outputdata/rplot26_gof_bR2.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$bR2),]
+  dotchart(goftablet$bR2, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Bias-Corrected Coefficient of Determination (-)", pch=19, xlim=c(0,1.05))
+  text(x=goftablet$bR2, y=1:nrow(goftablet), labels=round(goftablet$bR2,2), pos=4, cex=1)
+dev.off()
+
+png('ch2 data transformations/outputdata/rplot26_gof_NSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$NSE),]
+  dotchart(goftablet$NSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Nash-Sutcliffe Efficiency (-)", pch=19, xlim=c(min(goftablet$NSE), 1.0))
+  text(x=goftablet$NSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$NSE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+
+png('ch2 data transformations/outputdata/rplot26_gof_KGE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$KGE),]
+  dotchart(goftablet$KGE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Kling-Gupta Efficiency (-)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$KGE), 1.1))
+  text(x=goftablet$KGE, y=1:nrow(goftablet), labels=prettyNum(goftablet$KGE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+
+png('ch2 data transformations/outputdata/rplot26_gof_VE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
+  par(mar=c(2,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$VE),]
+  dotchart(goftablet$VE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Volumetric Efficiency (AF)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$VE), 1))
+  text(x=goftablet$VE, y=1:nrow(goftablet), labels=prettyNum(goftablet$VE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+```
+
+```{r obsvpred_plots}
+# smoothScatter plots
+obsvpredplot <- function(resultsdf, datatype, modelform){
+  # get the columns of interest
+  if(datatype=="agg"){
+    res_of_interest <- resultsdf$LMLOGORES
+    fit_of_interest <- resultsdf$LMLOGOFIT
+  } else if(datatype=="inc"){
+    res_of_interest <- resultsdf$LMLOGORES_AGG
+    fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
+  } else if(datatype=="cagg"){
+    res_of_interest <- resultsdf$LMLOGORES_NONC
+    fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
+  } else { # for datatype=="cinc" case
+    res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
+    fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
+  }
+  
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,3,1)+0.1, cex=1)
+  
+  # not producing nice results
+  # ggplot(data = resultsdf, aes(FLOW, fit_of_interest)) +
+  #   stat_density2d(aes(fill = ..density..^0.25), geom = "tile", contour = FALSE, n = 200, alpha=1) +
+  #   scale_fill_continuous(low = "white", high = cbpblack[6]) +
+  #   theme_bw() +
+  #   geom_point(alpha = 1, shape = 19, size=0.05) +
+  #   theme(legend.position = "none") +
+  #   xlab("Observed Unimpaired Flow (AF/m)") +
+  #   ylab("Predicted Unimpaired Flow (AF/m)")
+  
+    smoothScatter(resultsdf$FLOW, fit_of_interest, colramp = colorRampPalette(c("white", cbpblack[1])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)")
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(fit_of_interest~resultsdf$FLOW)
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(fit_of_interest, resultsdf$FLOW)[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+}
+
+# obsvpredplot(results_lm, "agg", "lm")
+# obsvpredplot(results_lm, "inc", "lm")
+# obsvpredplot(results_lm, "cagg", "lm")
+# obsvpredplot(results_lm, "cinc", "lm")
+# 
+# obsvpredplot(results_glm, "agg", "glm")
+# obsvpredplot(results_glm, "inc", "glm")
+# obsvpredplot(results_glm, "cagg", "glm")
+# obsvpredplot(results_glm, "cinc", "glm")
+
+# colour by hierrarchy smoothScatter plots
+obsvpredplot2 <- function(resultsdf, datatype, modelform){
+  if(datatype=="agg"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT
+  } else if(datatype=="inc"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
+  } else if(datatype=="cagg"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_NONC
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
+  } else { # for datatype=="cinc" case
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
+  }
+  
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h1.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,1)+0.1, cex=1)
+    smoothScatter(resultsdf[resultsdf$HIERARCHY==1, "FLOW"], resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[2])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==1, "FLOW"])
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==1, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+    
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h2.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,1)+0.1, cex=1)
+    smoothScatter(resultsdf[resultsdf$HIERARCHY==2, "FLOW"], resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[3])),  xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==2, "FLOW"])
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==2, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+    
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h3.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,1)+0.1, cex=1)
+    smoothScatter(resultsdf[resultsdf$HIERARCHY==3, "FLOW"], resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[4])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==3, "FLOW"])
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==3, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+    
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h4.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,1)+0.1, cex=1)
+    smoothScatter(resultsdf[resultsdf$HIERARCHY==4, "FLOW"], resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[5])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==4, "FLOW"])
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==4, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+    
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h5.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,1)+0.1, cex=1)
+    smoothScatter(resultsdf[resultsdf$HIERARCHY==5, "FLOW"], resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[6])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
+    abline(0,1, col="grey70", lty=2, lwd=2)
+    lmline <- lm(resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==5, "FLOW"])
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
+    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==5, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
+  dev.off()
+}
+  
+# obsvpredplot2(results_lm, "agg", "lm")
+# obsvpredplot2(results_lm, "inc", "lm")
+# obsvpredplot2(results_lm, "cagg", "lm")
+# obsvpredplot2(results_lm, "cinc", "lm")
+# 
+# obsvpredplot2(results_glm, "agg", "glm")
+# obsvpredplot2(results_glm, "inc", "glm")
+# obsvpredplot2(results_glm, "cagg", "glm")
+# obsvpredplot2(results_glm, "cinc", "glm")
+
+# color by hierarchy plot, use these in paper
+obsvpredplot3 <- function(resultsdf, datatype, modelform, legendpos){
+  if(datatype=="agg"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT
+  } else if(datatype=="inc"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
+  } else if(datatype=="cagg"){
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_NONC
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
+  } else { # for datatype=="cinc" case
+      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
+      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
+  }
+  
+  # find y and x limits
+  xlower <- min(resultsdf$FLOW, na.rm=TRUE)
+  xupper <- max(resultsdf$FLOW, na.rm=TRUE)
+  ylower <- min(resultsdf$fit_of_interest, na.rm=TRUE)
+  yupper <- max(resultsdf$fit_of_interest, na.rm=TRUE)
+  xylower <- min(xlower, ylower)
+  xyupper <- max(xupper, yupper)
+  
+  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred2_', modelform, "_", datatype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,3)+0.1, cex=1)
+    plot(resultsdf$FLOW, resultsdf$fit_of_interest, col=cbpblack[2:6][resultsdf$HIERARCHY], xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+    abline(0,1, col="grey70", lty=3, lwd=2)
+    lmline <- lm(resultsdf$fit_of_interest~resultsdf$FLOW)
+    abline(lmline, col=cbpblack[8])
+    legend("topright", horiz=TRUE, inset=c(0.01, -0.14), cex=0.6, legend=c(1:5), title= "Basin Hierarchy", pch=19, col=cbpblack[2:6], bg="grey96", box.lty=0, xpd=TRUE, xjust=1, title.adj=0)
+    legend(legendpos, horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(3,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="grey96", xpd=TRUE, box.lty=0)
+    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.01)
+    # mtext(paste("bR2:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+    mtext(paste("Model NSE:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  dev.off()
+}
+
+obsvpredplot3(results_lm, "agg", "lm", "topleft") 
+obsvpredplot3(results_lm, "inc", "lm", "topleft") 
+obsvpredplot3(results_lm, "cagg", "lm", "topright") 
+obsvpredplot3(results_lm, "cinc", "lm", "topright") 
+
+obsvpredplot3(results_glm, "agg", "glm", "bottomright") 
+obsvpredplot3(results_glm, "inc", "glm", "bottomright") 
+obsvpredplot3(results_glm, "cagg", "glm", "bottomright") 
+obsvpredplot3(results_glm, "cinc", "glm", "bottomright")
+
+obsvpredplot3(results_rf, "agg", "rf", "topleft") 
+obsvpredplot3(results_rf, "inc", "rf", "topleft") 
+obsvpredplot3(results_rf, "cagg", "rf", "topright") 
+obsvpredplot3(results_rf, "cinc", "rf", "topright") 
+
+obsvpredplot3(results_nn, "agg", "nn", "topleft") 
+obsvpredplot3(results_nn, "inc", "nn", "topleft") 
+obsvpredplot3(results_nn, "cagg", "nn", "topright") 
+obsvpredplot3(results_nn, "cinc", "nn", "topright") 
+
+# FIND THE OTHER PROBLEM BASINS!
+# png(paste0('ch2 data transformations/outputdata/rplot27_tbd.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+#   plot(results_glm[results_glm$CDEC_ID=="KLO", "FLOW"], results_glm[results_glm$CDEC_ID=="KLO", "LMLOGOFIT"] , xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", xlim=c(0,4e6), ylim=c(0,3e8), pch=19)
+# dev.off()
+```
+
+```{r obsvpredplot_forpaper}
+# when you have picked what models to show, use this
+png('ch2 data transformations/outputdata/rplot27_obsvspred_all.png', width=6.5, height=8, units="in", pointsize=8, res=1200)
+  op <- par(mfrow = c(4, 2),     # 4x2 layout
+        oma = c(5, 4, 5, 5),     # two rows of text at the outer left and bottom margin
+        mar = c(1, 1, 1, 1)+0.1, # space for one row of text at ticks and to separate plots
+        mgp = c(2, 1, 0),        # axis label at 2 rows distance, tick labels at 1 row
+        xpd = FALSE)             # allow content to protrude into outer margin (and beyond)
+    
+  # par(mfrow = c(4,2), oma = c(2,2,0,0), mar = c(1,1,0,0))
+  
+  # find y and x limits
+  xlower <- min(results_all$FLOW, na.rm=TRUE)
+  xupper <- max(results_all$FLOW, na.rm=TRUE)
+  ylower <- min(results_all$LMLOGOFIT, na.rm=TRUE)
+  yupper <- max(results_all$LMLOGOFIT, na.rm=TRUE)
+  xylower <- min(xlower, ylower)
+  xyupper <- max(xupper, yupper)
+  
+  plot(results_all$FLOW, results_all$LMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$LMLOGOFIT~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  mtext("Aggregate", side=3, line=1)
+  
+  plot(results_all$FLOW, results_all$LMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$LMLOGOFIT_AGG~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  mtext("Incremental", side=3, line=1)
+  mtext("LM", side=4, line=1)
+  
+  plot(results_all$FLOW, results_all$GLMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$GLMLOGOFIT~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  
+  plot(results_all$FLOW, results_all$GLMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$GLMLOGOFIT_AGG~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  mtext("GLM", side=4, line=1)
+  
+  plot(results_all$FLOW, results_all$RFLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$RFLOGOFIT~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  
+  plot(results_all$FLOW, results_all$RFLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$RFLOGOFIT_AGG~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  mtext("RF", side=4, line=1)
+  
+  plot(results_all$FLOW, results_all$NNLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$NNLOGOFIT~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), c("Y = X line", "Regression line"), lty=c(3,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="white", box.lty=0)
+  
+  plot(results_all$FLOW, results_all$NNLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+  abline(0,1, col="grey70", lty=3, lwd=2)
+  lmline <- lm(results_all$NNLOGOFIT_AGG~results_all$FLOW)
+  abline(lmline, col=cbpblack[8])
+  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+  # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+  mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+  mtext("NN", side=4, line=1)
+  legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), legend=c(1:5), title= "Basin \nHierarchy", pch=19, col=cbpblack[2:6], bg="white", box.lty=0, xjust=1, title.adj=0)
+  title(xlab = "Observed Unimpaired Flow (AF/m)", ylab = "Predicted Unimpaired Flow (AF/m)", outer = TRUE, line = 2)
+  par(op)
+dev.off()
+```
+
+```{r error_density_plots}
+# not done yet
+# density plots of obs and pred data
+plot(density(results_lm$FLOW), main="")
+rug(jitter(results_lm$FLOW))
+lines(density(results_lm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[2])
+lines(density(results_lm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[3])
+lines(density(results_lm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[4])
+lines(density(results_lm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpblack[5])
+lines(density(results_glm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[6])
+lines(density(results_glm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[7])
+lines(density(results_glm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[8])
+lines(density(results_glm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpgrey[1])
+
+plot(density(results_glm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpgrey[1], main="")
+lines(density(results_lm$FLOW), col="black")
+rug(jitter(results_lm$FLOW))
+lines(density(results_lm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[2])
+lines(density(results_lm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[3])
+lines(density(results_lm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[4])
+lines(density(results_lm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpblack[5])
+lines(density(results_glm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[6])
+lines(density(results_glm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[7])
+lines(density(results_glm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[8])
+
+# ggplot(results_lm) + geom_density(aes(x = yield, fill = site), alpha = 0.2)
+
+results_all_melted <- melt(results_all[,c("DATE", "CDEC_ID", "FLOW", "LMLOGOFIT", "LMLOGOFIT_AGG", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC", "GLMLOGOFIT", "GLMLOGOFIT_AGG", "GLMLOGOFIT_NONC", "GLMLOGOFIT_AGG_NONC")], id.vars=c("DATE", "CDEC_ID"))
+results_all_melted <- na.omit(results_all_melted)
+ggplot(results_all_melted, aes(x = value), alpha = 0.2) +
+  geom_density(aes(color = variable)) +
+  ylim(0, 1.5e-5) +
+  xlim(0, 4e6) +
+  scale_color_manual(values=c(cbpblack, cbpgrey[1]))+
+  theme_bw()
+```
+
+```{r error_mapplots}
+# modelform can be: "lm", "glm", "rf", "nn"
+# datatype can be: "agg", "cagg", "inc", "cinc"
+library(RColorBrewer)
+library(lattice)
+library(grid)
+
+rmsemap <- function(gof_results, datatype, modelform){
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+  
+  png(paste0('ch2 data transformations/outputdata/rplot28_rmsemap_', modelform, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["RMSE"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), 
+                      colorkey = list(
+                        right = list( # see ?levelplot in package trellis, argument colorkey:
+                          fun = draw.colorkey, 
+                          args = list(
+                            key = list(
+                              at = seq(0, 1, 1/100), # colour breaks
+                              col = mycolors(100), # colours
+                              labels = list(
+                              at = seq(0, 1, 20/100),
+                              labels =prettyNum(round(seq(min(basinsc$RMSE, na.rm=TRUE), 
+max(basinsc$RMSE, na.rm=TRUE), 1e5), 0), big.mark = ",") 
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+  print(tbdspplot)
+  grid.text("RMSE(AF)", 0.57, 0.88)
+  dev.off()
+}
+rmsemap(gof_rf_inc_by_basins, "inc", "rf")
+rmsemap(gof_rf_agg_by_basins, "agg", "rf")
+rmsemap(gof_glm_inc_by_basins, "inc", "glm")
+rmsemap(gof_glm_agg_by_basins, "agg", "glm")
+rmsemap(gof_nn_inc_by_basins, "inc", "nn")
+rmsemap(gof_nn_agg_by_basins, "agg", "nn")
+
+br2map <- function(gof_results, datatype, modelform){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+  png(paste0('ch2 data transformations/outputdata/rplot28_br2map_', modelform, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["bR2"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), colorkey = list(right = list( # see ?levelplot in package trellis, argument colorkey:
+                      fun = draw.colorkey, 
+                      args = list(
+                             key = list(
+                                  at = seq(0, 1.0, 1/100), # colour breaks
+                                  col = mycolors(100), # colours
+                                  labels = list(
+                                      at = seq(0, 1.0, 0.2),
+                                      labels = seq(0, 1.0, 0.2)
+                                      )
+                                   )
+                              )
+                      )
+          )
+  )
+  print(tbdspplot)
+  grid.text("bR2(-)", 0.65, 0.88)
+  dev.off()
+}
+br2map(gof_rf_inc_by_basins, "inc", "rf")
+br2map(gof_rf_agg_by_basins, "agg", "rf")
+br2map(gof_glm_inc_by_basins, "inc", "glm")
+br2map(gof_glm_agg_by_basins, "agg", "glm")
+br2map(gof_nn_inc_by_basins, "inc", "nn")
+br2map(gof_nn_agg_by_basins, "agg", "nn")
+
+nsemap <- function(gof_results, datatype, modelform){
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+  png(paste0('ch2 data transformations/outputdata/rplot28_nsemap_', modelform, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  # breaksnse <- c(-6.2e3,-50,-10,seq(0,1,0.2))
+  # basinsc@data$NSECUT <- cut(basinsc$NSE, breaks=breaksnse)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["NSE"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), colorkey = list(right = list( # see ?levelplot in package trellis, argument colorkey:
+                  fun = draw.colorkey,
+                  args = list(
+                      key = list(
+                                  at = seq(0,1, 1/100), # colour breaks
+                                  col = mycolors(100), # colours
+                                  labels = list(
+                                      at = seq(0, 1, 1/7),
+                                      labels = c(round(min(gof_results[9, ]), 0),-10, seq(0,1,0.2))
+                                      )
+                                   )
+                              )
+                     )
+          )
+)
+  print(tbdspplot)
+  grid.text("NSE(-)", 0.60, 0.88)
+  dev.off()
+}
+nsemap(gof_rf_inc_by_basins, "inc", "rf")
+nsemap(gof_rf_agg_by_basins, "agg", "rf")
+nsemap(gof_glm_inc_by_basins, "inc", "glm")
+nsemap(gof_glm_agg_by_basins, "agg", "glm")
+nsemap(gof_nn_inc_by_basins, "inc", "nn")
+nsemap(gof_nn_agg_by_basins, "agg", "nn")
+
+kgemap <- function(gof_results, datatype, modelform){
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+  png(paste0('ch2 data transformations/outputdata/rplot28_kgemap_', modelform, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["KGE"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), colorkey = list(right = list( # see ?levelplot in package trellis, argument colorkey:
+                      fun = draw.colorkey,
+                      args = list(
+                             key = list(
+                                  at = seq(0, 1, 1/100), # colour breaks
+                                  col = mycolors(100), # colours
+                                  labels = list(
+                                      at = seq(0, 1, 1/7),
+                                      labels = round(c(seq(min(gof_results[19,]), max(gof_results[19,]), 20), 0), 0)
+                                      )
+                                   )
+                              )
+                      )
+          )
+  )
+  print(tbdspplot)
+  grid.text("KGE(-)", 0.65, 0.88)
+  dev.off()
+}
+kgemap(gof_rf_inc_by_basins, "inc", "rf")
+kgemap(gof_rf_agg_by_basins, "agg", "rf")
+kgemap(gof_glm_inc_by_basins, "inc", "glm")
+kgemap(gof_glm_agg_by_basins, "agg", "glm")
+kgemap(gof_nn_inc_by_basins, "inc", "nn")
+kgemap(gof_nn_agg_by_basins, "agg", "nn")
+
+vemap <- function(gof_results, datatype, modelform){
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+  png(paste0('ch2 data transformations/outputdata/rplot28_vemap_', modelform, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["VE"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), colorkey = list(right = list( # see ?levelplot in package trellis, argument colorkey:
+                      fun = draw.colorkey,
+                      args = list(
+                             key = list(
+                                  at = seq(0, 1, 1/100), # colour breaks
+                                  col = mycolors(100), # colours
+                                  labels = list(
+                                      at = seq(0, 1, 1/6),
+                                      labels = round(c(seq(min(gof_results[20,]), max(gof_results[20,]), 25), 1), 0)
+                                      )
+                                   )
+                              )
+                      )
+          )
+  )
+  print(tbdspplot)
+  grid.text("VE(AF)", 0.63, 0.88)
+  dev.off()
+}
+vemap(gof_rf_inc_by_basins, "inc", "rf")
+vemap(gof_rf_agg_by_basins, "agg", "rf")
+vemap(gof_glm_inc_by_basins, "inc", "glm")
+vemap(gof_glm_agg_by_basins, "agg", "glm")
+vemap(gof_nn_inc_by_basins, "inc", "nn")
+vemap(gof_nn_agg_by_basins, "agg", "nn")
+```
+
+```{r spacial_hierarchy_plot}
+basinsc <- basins_points
+basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") +  (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+png('ch2 data transformations/outputdata/rplot210_hierarchies.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  spplot(basinsc["HIERARCHY"], cex=0.8, sp.layout=counties, col.regions = cbpblack[2:6],
+         colorkey = list(
+           right = list( # see ?levelplot in package trellis, argument colorkey:
+             fun = draw.colorkey,
+             args = list(
+               key = list(
+                 at = seq(0, 5, 1), # colour breaks
+                 col = cbpblack[2:6], # colours
+                 labels = list(
+                   at = seq(0.5, 4.5, 1),
+                   labels = seq(1, 5, 1)
+                   )
+                 )
+               )
+             )
+           )
+         )
+  grid.text("Hierarchy", 0.63, 0.88)
+dev.off()
+```
+
+```{r error_hierarchy_plots}
+# plot errors by location in the hierarchy
+# datatype can be: "agg", "cagg", "inc", "cinc"
+# fitofinterest can be anything returned by the gof function
+  
+gofdotchart <- function(gof_results, datatype, modelform, fitofinterest){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  basinsc <- basinsc@data[order(basinsc@data[, fitofinterest], decreasing=TRUE), ]
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  grps <- as.factor(basinsc$HIERARCHY)
+  
+  # for the y position of the labels on the points in the dotchart, we have to do all this crazy business
+  tbdvector <- c(basinsc[which(basinsc[, "HIERARCHY"]==1), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==2), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==3), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==4), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==5), "CDEC_ID"])
+  tbdvector <- data.frame(cbind(tbdvector, ylabels=c(30:76, 16:27, 9:13, 4:6, 1)))
+  basinsc <- merge(basinsc, tbdvector, by.x="CDEC_ID", by.y="tbdvector")
+  basinsc <- basinsc[order(basinsc[, fitofinterest], decreasing=TRUE), ]
+  
+  tbdmin <- basinsc[, fitofinterest]
+  tbdmin <- tbdmin[which(tbdmin>-Inf)]
+  minxlim <- min(tbdmin, na.rm = TRUE)
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 500
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  png(paste0('ch2 data transformations/outputdata/rplot29_', fitofinterest, "dotchart_", modelform, "_", datatype, '.png'), width=6.5, height=8, units="in", pointsize=8, res=1200)
+    dotchart(basinsc[, fitofinterest], xlab=fitofinterestlabel, ylab="", labels=basinsc$CDEC_ID, group=grps, cex=0.8, pch=19, color="black", xlim=c(minxlim, maxxlim))
+    mtext("Basin Hierarchies", side=2, line=2, cex=0.8)
+    text(x=basinsc[, fitofinterest], y=as.numeric(as.character(basinsc$ylabels)), labels=prettyNum(basinsc[, fitofinterest], digits=2), pos=4, cex=1)
+  dev.off()
+}
+
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "ME")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "MAE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "MSE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "RMSE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "NRMSE..")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "PBIAS..")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "RSR")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rSD")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "NSE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "mNSE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rNSE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "d")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "md")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rd")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "cp")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "r")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "R2")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "bR2")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "KGE")
+# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "VE")
+# 
+# gofdotchart(gof_rf_inc_by_basins, "inc", "rf", "bR2")
+# gofdotchart(gof_rf_inc_by_basins, "inc", "rf", "NSE")
+
+# agg and inc comparisons
+gofdotchart2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendpos){
+  tgof_results_agg <- data.frame(t(gof_results_agg))
+  tgof_results_agg$CDEC_ID <- rownames(tgof_results_agg)
+  basinsc <- basins_points@data
+  basinsc <- merge(basinsc, tgof_results_agg, by="CDEC_ID", all=TRUE)
+  tgof_results_inc <- data.frame(t(gof_results_inc))
+  tgof_results_inc$CDEC_ID <- rownames(tgof_results_inc)
+  basinsc2 <- basins_points@data
+  basinsc2 <- merge(basinsc2, tgof_results_inc, by="CDEC_ID", all=TRUE)
+
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc2$HIERARCHY <- (basinsc2$STATIONS_ABOVE1!="none") + (basinsc2$STATIONS_ABOVE2!="none") + (basinsc2$STATIONS_ABOVE3!="none") + (basinsc2$STATIONS_ABOVE4!="none") + 1
+  basinsc2 <- basinsc2[order(basinsc2[, fitofinterest], decreasing=TRUE), ]
+
+  basinsm <- merge(basinsc2, basinsc, by="CDEC_ID")
+  basinsm <- basinsm[order(basinsm[, paste0(fitofinterest, ".x")], decreasing=TRUE), ]
+  tbdmin <- basinsm[, paste0(fitofinterest, ".x")]
+  tbdmin <- tbdmin[which(tbdmin>-Inf)]
+  minxlim <- min(tbdmin, na.rm = TRUE)
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "ME.x"], na.rm=TRUE), 1.1*max(basinsm[, "ME.y"], na.rm=TRUE))
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "MAE.x"], na.rm=TRUE), 1.1*max(basinsm[, "MAE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- max(1.1*max(basinsm[, "MSE.x"], na.rm=TRUE), 1.1*max(basinsm[, "MSE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "RMSE.x"], na.rm=TRUE), 1.1*max(basinsm[, "RMSE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- max(1.1*max(basinsm[, "NRMSE...x"], na.rm=TRUE), 1.1*max(basinsm[, "NRMSE...y"], na.rm=TRUE))
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- max(1.4*max(basinsm[, "PBIAS...x"], na.rm=TRUE), 1.4*max(basinsm[, "PBIAS...y"], na.rm=TRUE))
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 10
+    # minxlim <- 7*minxlim
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- max(1.1*max(basinsm[, "rSD.x"], na.rm=TRUE), 1.1*max(basinsm[, "rSD.y"], na.rm=TRUE))
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- max(1.05*max(basinsm[, "d.x"], na.rm=TRUE), 1.05*max(basinsm[, "d.y"], na.rm=TRUE))
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- max(1.1*max(basinsm[, "md.x"], na.rm=TRUE), 1.1*max(basinsm[, "md.y"], na.rm=TRUE))
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- max(1.1*max(basinsm[, "r.x"], na.rm=TRUE), 1.1*max(basinsm[, "r.y"], na.rm=TRUE))
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+    minxlim <- -0.05
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  png(paste0('ch2 data transformations/outputdata/rplot211_', fitofinterest, 'dotchart_comp.png'), width=6.5, height=8, units="in", pointsize=8, res=1200)
+    dotchart(basinsm[, paste0(fitofinterest, ".x")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=19, color="black", xlim=c(minxlim, maxxlim))
+    mtext("Basin Hierarchies", side=2, line=2, cex=0.8)
+    # to allow over plotting
+    par(new=TRUE)
+    basinsm$mycol <- as.integer(basinsm[, paste0(fitofinterest, ".y")]>basinsm[, paste0(fitofinterest, ".x")])+7
+    mycol <- cbpblack[basinsm$mycol]
+    dotchart(basinsm[, paste0(fitofinterest, ".y")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=2, xlim=c(minxlim, maxxlim), col=mycol )
+    legend(legendpos, pch=c(19,2,2,2), c("inc", "agg", "agg>inc", "inc>agg"), col=c("black", "black", cbpblack[8], cbpblack[7]), bg="grey96", horiz=FALSE, inset=c(0.01, 0.01), cex=0.8, box.lty=0)
+  dev.off()
+}
+
+# gofdotchart2(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "NSE", "topleft")
+# gofdotchart2(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "bR2", "topright")
+# gofdotchart2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "NSE", "left")
+# gofdotchart2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2", "topright")
+gofdotchart2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "NSE", "left")
+gofdotchart2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
+```
+
+```{r boxplot}
+gofboxplot <- function(gof_results, datatype, modelform, fitofinterest){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  basinsc <- basinsc@data[order(basinsc@data[, fitofinterest], decreasing=TRUE), ]
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc$GRPS <- as.factor(basinsc$HIERARCHY)
+  basinsc <- basinsc[order(basinsc[, fitofinterest], decreasing=TRUE), ]
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 500
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  plottoprint <- ggplot(basinsc, aes(x=GRPS, y=basinsc[,fitofinterest], fill=GRPS))+
+      geom_boxplot(outlier.shape=NA, alpha=0.3) +
+      geom_jitter(shape=16, position=position_jitter(0.1)) +
+      coord_flip() +
+      theme_bw(base_size = 8) +
+      ylab(fitofinterestlabel) +
+      xlab("Basin Hierarchy") +
+      scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
+      scale_color_manual(values=cbpblack[2:6]) +
+      theme(legend.position="none")
+  
+  png(paste0('ch2 data transformations/outputdata/rplot212_', fitofinterest, "gofboxplot_", modelform, "_", datatype, '.png'), width=6.5, height=1.8, units="in", pointsize=8, res=1200)
+    par(mar=c(0,0,0,0)+0.1, cex=1)
+    print(plottoprint)
+  dev.off()
+}
+
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "ME")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MAE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RMSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NRMSE..")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "PBIAS..")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RSR")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rSD")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "mNSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rNSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "d")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "md")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rd")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "cp")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "r")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "R2")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "bR2")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "KGE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "VE")
+
+gofboxplot2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendpos){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results_agg))
+  results$CDEC_ID <- rownames(results)
+  
+  results2 <- data.frame(t(gof_results_inc))
+  results2$CDEC_ID <- rownames(results2)
+  
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE) # the .x s are the agg basins, the .y s are the inc
+  basinsc <- merge(basinsc, results2, by="CDEC_ID", all=TRUE)
+  
+  basinsc <- basinsc@data[order(basinsc@data[, paste0(fitofinterest, ".y")], decreasing=TRUE), ]
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc$GRPS <- as.factor(basinsc$HIERARCHY)
+  basinsc <- basinsc[order(basinsc[, paste0(fitofinterest, ".y")], decreasing=TRUE), ]
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 500
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  basinsc2 <- melt(basinsc[,c("CDEC_ID", "GRPS", paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y"))], id.vars = c("CDEC_ID", "GRPS"), measure.vars = c(paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y")))
+  plottoprint <- ggplot(basinsc2, aes(x=GRPS, y=value, fill=variable))+
+      geom_boxplot(outlier.shape=NA, alpha=0.3, position=position_dodge(1)) +
+      geom_point(position=position_dodge(width=1), aes(group=variable, col=variable), show.legend=FALSE) +
+      # geom_jitter(shape=16, position=position_jitter(0.1), aes(group=variable)) +
+      coord_flip() +
+      theme_bw(base_size = 8) +
+      ylab(fitofinterestlabel) +
+      xlab("Basin Hierarchy") +
+      scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
+      scale_color_manual(values=cbpblack[7:8]) +
+      theme(legend.title = element_blank(), legend.text=element_text(size=10), text=element_text(size=10)) +
+      scale_fill_discrete(labels=c("agg", "inc"))
+  
+  png(paste0('ch2 data transformations/outputdata/rplot212_', fitofinterest, "gofboxplot_comp.png"), width=6.5, height=4, units="in", pointsize=8, res=1200)
+    par(mar=c(0,0,0,0)+0.1, cex=1)
+    print(plottoprint)
+  dev.off()
+}
+
+# gofboxplot2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2", "topright")
+gofboxplot2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
+```
+
+

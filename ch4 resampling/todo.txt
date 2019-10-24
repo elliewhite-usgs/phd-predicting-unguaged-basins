@@ -1,0 +1,8 @@
+To Do: 
+
+IMPORTANT, check that inc basins make sense, because if basins above are nested, you may be subtracting two datasets instead of the one!!!! for example, check with KRB, KRK, KRI basins
+
+
+1) why is lmc_inc not working for logo, something with DOMGEOLOGY is messing it up
+2) post process the inc back to agg and the cumulative back to non-cumulative values. Then compare the gofs
+
