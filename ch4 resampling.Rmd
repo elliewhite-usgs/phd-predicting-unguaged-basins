@@ -256,10 +256,10 @@ lm_inc_lmgo_results <- readRDS("ch4 resampling/outputdata/rds/lm_inc_lmgo_result
 ```
 
 ```{r glm_modelling_and_cv}
-glmcv <- function(data, groupingstyle, datatype, ...){ 
+glmcv <- function(data, groupingstyle, datatype){
   # for resubstitution, where testing data and training data is the same
   if(groupingstyle=="resub"){
-    linearmodel <- glm(FLOW~. , data=data[,c(15,18:ncol(data))], ...)
+    linearmodel <- glm(FLOW~., data=data[,c(15,18:ncol(data))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
     predictions <- predict(linearmodel, data, type='response')
     results <- cbind(obs=data$FLOW, pred=predictions)
     modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
@@ -272,7 +272,7 @@ glmcv <- function(data, groupingstyle, datatype, ...){
     for (k in 1:groupingstyle) {
       trainset <- data[group != k, ]
       testset <- data[group == k, ]
-      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], ...)
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
       predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
@@ -289,8 +289,8 @@ glmcv <- function(data, groupingstyle, datatype, ...){
       h <- unique(data$CDEC_ID)[k]
       testset <- data[data$CDEC_ID==h,]
       trainset <- data[data$CDEC_ID!=h,]
-      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], ...)
-      predictions <- predict(linearmodel[[k]], testset, type='response') # should this be "link" or "response"?
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+      predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
     }
@@ -312,7 +312,7 @@ glmcv <- function(data, groupingstyle, datatype, ...){
     for (k in 1:nfolds) {
       testset <- data[data$kftrain == k, ]
       trainset <- data[data$kftrain != k, ]
-      linearmodel[[k]] <- glm(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], ...)
+      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
       predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
@@ -338,19 +338,19 @@ glmcv <- function(data, groupingstyle, datatype, ...){
 }
 
 library(statmod)
-# glmtwd_agg_resub_results <- glmcv(df_lm_agg, "resub", "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_agg_2fold_results <- glmcv(df_lm_agg, 2L, "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_agg_5fold_results <- glmcv(df_lm_agg, 5L, "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_agg_10fold_results <- glmcv(df_lm_agg, 10L, "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_agg_logo_results <- glmcv(df_lm_agg, "logo", "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_agg_lmgo_results <- glmcv(df_lm_agg, "lmgo", "agg", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# glmtwd_agg_resub_results <- glmcv(df_lm_agg, "resub", "agg")
+# glmtwd_agg_2fold_results <- glmcv(df_lm_agg, 2L, "agg")
+# glmtwd_agg_5fold_results <- glmcv(df_lm_agg, 5L, "agg")
+# glmtwd_agg_10fold_results <- glmcv(df_lm_agg, 10L, "agg")
+# glmtwd_agg_logo_results <- glmcv(df_lm_agg, "logo", "agg")
+# glmtwd_agg_lmgo_results <- glmcv(df_lm_agg, "lmgo", "agg")
 # 
-# glmtwd_inc_resub_results <- glmcv(df_lm_inc, "resub", "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_inc_2fold_results <- glmcv(df_lm_inc, 2L, "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_inc_5fold_results <- glmcv(df_lm_inc, 5L, "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_inc_10fold_results <- glmcv(df_lm_inc, 10L, "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_inc_logo_results <- glmcv(df_lm_inc, "logo", "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-# glmtwd_inc_lmgo_results <- glmcv(df_lm_inc, "lmgo", "inc", family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+# glmtwd_inc_resub_results <- glmcv(df_lm_inc, "resub", "inc")
+# glmtwd_inc_2fold_results <- glmcv(df_lm_inc, 2L, "inc")
+# glmtwd_inc_5fold_results <- glmcv(df_lm_inc, 5L, "inc")
+# glmtwd_inc_10fold_results <- glmcv(df_lm_inc, 10L, "inc")
+# glmtwd_inc_logo_results <- glmcv(df_lm_inc, "logo", "inc")
+# glmtwd_inc_lmgo_results <- glmcv(df_lm_inc, "lmgo", "inc")
 # 
 # saveRDS(glmtwd_agg_resub_results, file="ch4 resampling/outputdata/rds/glmtwd_agg_resub_results.RDS")
 # saveRDS(glmtwd_agg_2fold_results, file="ch4 resampling/outputdata/rds/glmtwd_agg_2fold_results.RDS")
@@ -404,7 +404,7 @@ rfcv <- function(data, groupingstyle, datatype){
   if(is.integer(groupingstyle)){
     group <- kfold(data, groupingstyle)
     results <- modgof <- list()
-    for (k in 1:groupingstyle) {
+    for(k in 1:groupingstyle) {
       trainset <- data[group != k, ]
       testset <- data[group == k, ]
       rfmodel <- randomForest(FLOW~. , data=trainset[,c(15,18:ncol(trainset))], mtry=mt)
@@ -509,6 +509,7 @@ rf_inc_logo_results <- readRDS("ch4 resampling/outputdata/rds/rf_inc_logo_result
 rf_inc_lmgo_results <- readRDS("ch4 resampling/outputdata/rds/rf_inc_lmgo_results.RDS")
 ```
 
+RUN JUST THE NN INC ONES LATER
 ```{r nn_modeling_and_cv}
 # install and set up our environment for deep learning
 # devtools::install_github("rstudio/keras")
@@ -542,7 +543,7 @@ nncv <- function(data, groupingstyle, datatype){
   if(is.integer(groupingstyle)){
     group <- kfold(data, groupingstyle)
     results <- modgof <- list()
-    for (k in 1:groupingstyle) {
+    for(k in 1:groupingstyle) {
       trainset <- data[group != k, ]
       testset <- data[group == k, ]
       
@@ -556,7 +557,7 @@ nncv <- function(data, groupingstyle, datatype){
         fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
       predictions <- nnmodel %>% predict(testsetpvs)
       predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions, nforstitch=as.numeric(rownames(testset))) # adding rownames here for later stitching the dataset back to its original shape
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
     }
     names_tbd <- rownames(modgof[[1]])
@@ -599,7 +600,7 @@ nncv <- function(data, groupingstyle, datatype){
     data <- merge(data, group, by="CDEC_ID")
     
     results <- modgof <- list()
-    for (k in 1:nfolds) {
+    for(k in 1:nfolds) {
       testset <- data[data$kftrain == k, ]
       trainset <- data[data$kftrain != k, ]
       testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-2))])
@@ -611,7 +612,7 @@ nncv <- function(data, groupingstyle, datatype){
         fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
       predictions <- nnmodel %>% predict(testsetpvs)
       predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions, nforstitch=as.numeric(rownames(testset)))
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
     }
     names_tbd <- rownames(modgof[[1]])
@@ -628,33 +629,33 @@ nncv <- function(data, groupingstyle, datatype){
   }
 }
 
-nn_agg_resub_results <- nncv(df_lm_agg, "resub", "agg")
-nn_agg_2fold_results <- nncv(df_lm_agg, 2L, "agg")
-nn_agg_5fold_results <- nncv(df_lm_agg, 5L, "agg")
-nn_agg_10fold_results <- nncv(df_lm_agg, 10L, "agg")
-nn_agg_logo_results <- nncv(df_lm_agg, "logo", "agg")
-nn_agg_lmgo_results <- nncv(df_lm_agg, "lmgo", "agg")
-
-nn_inc_resub_results <- nncv(df_lm_inc, "resub", "inc")
-nn_inc_2fold_results <- nncv(df_lm_inc, 2L, "inc")
-nn_inc_5fold_results <- nncv(df_lm_inc, 5L, "inc")
-nn_inc_10fold_results <- nncv(df_lm_inc, 10L, "inc")
-nn_inc_logo_results <- nncv(df_lm_inc, "logo", "inc")
-nn_inc_lmgo_results <- nncv(df_lm_inc, "lmgo", "inc")
-
-saveRDS(nn_agg_resub_results, file="ch4 resampling/outputdata/rds/nn_agg_resub_results.RDS")
-saveRDS(nn_agg_2fold_results, file="ch4 resampling/outputdata/rds/nn_agg_2fold_results.RDS")
-saveRDS(nn_agg_5fold_results, file="ch4 resampling/outputdata/rds/nn_agg_5fold_results.RDS")
-saveRDS(nn_agg_10fold_results, file="ch4 resampling/outputdata/rds/nn_agg_10fold_results.RDS")
-saveRDS(nn_agg_logo_results, file="ch4 resampling/outputdata/rds/nn_agg_logo_results.RDS")
-saveRDS(nn_agg_lmgo_results, file="ch4 resampling/outputdata/rds/nn_agg_lmgo_results.RDS")
-
-saveRDS(nn_inc_resub_results, file="ch4 resampling/outputdata/rds/nn_inc_resub_results.RDS")
-saveRDS(nn_inc_2fold_results, file="ch4 resampling/outputdata/rds/nn_inc_2fold_results.RDS")
-saveRDS(nn_inc_5fold_results, file="ch4 resampling/outputdata/rds/nn_inc_5fold_results.RDS")
-saveRDS(nn_inc_10fold_results, file="ch4 resampling/outputdata/rds/nn_inc_10fold_results.RDS")
-saveRDS(nn_inc_logo_results, file="ch4 resampling/outputdata/rds/nn_inc_logo_results.RDS")
-saveRDS(nn_inc_lmgo_results, file="ch4 resampling/outputdata/rds/nn_inc_lmgo_results.RDS")
+# nn_agg_resub_results <- nncv(df_lm_agg, "resub", "agg")
+# nn_agg_2fold_results <- nncv(df_lm_agg, 2L, "agg")
+# nn_agg_5fold_results <- nncv(df_lm_agg, 5L, "agg")
+# nn_agg_10fold_results <- nncv(df_lm_agg, 10L, "agg")
+# nn_agg_logo_results <- nncv(df_lm_agg, "logo", "agg")
+# nn_agg_lmgo_results <- nncv(df_lm_agg, "lmgo", "agg")
+# 
+# nn_inc_resub_results <- nncv(df_lm_inc, "resub", "inc")
+# nn_inc_2fold_results <- nncv(df_lm_inc, 2L, "inc")
+# nn_inc_5fold_results <- nncv(df_lm_inc, 5L, "inc")
+# nn_inc_10fold_results <- nncv(df_lm_inc, 10L, "inc")
+# nn_inc_logo_results <- nncv(df_lm_inc, "logo", "inc")
+# nn_inc_lmgo_results <- nncv(df_lm_inc, "lmgo", "inc")
+# 
+# saveRDS(nn_agg_resub_results, file="ch4 resampling/outputdata/rds/nn_agg_resub_results.RDS")
+# saveRDS(nn_agg_2fold_results, file="ch4 resampling/outputdata/rds/nn_agg_2fold_results.RDS")
+# saveRDS(nn_agg_5fold_results, file="ch4 resampling/outputdata/rds/nn_agg_5fold_results.RDS")
+# saveRDS(nn_agg_10fold_results, file="ch4 resampling/outputdata/rds/nn_agg_10fold_results.RDS")
+# saveRDS(nn_agg_logo_results, file="ch4 resampling/outputdata/rds/nn_agg_logo_results.RDS")
+# saveRDS(nn_agg_lmgo_results, file="ch4 resampling/outputdata/rds/nn_agg_lmgo_results.RDS")
+# 
+# saveRDS(nn_inc_resub_results, file="ch4 resampling/outputdata/rds/nn_inc_resub_results.RDS")
+# saveRDS(nn_inc_2fold_results, file="ch4 resampling/outputdata/rds/nn_inc_2fold_results.RDS")
+# saveRDS(nn_inc_5fold_results, file="ch4 resampling/outputdata/rds/nn_inc_5fold_results.RDS")
+# saveRDS(nn_inc_10fold_results, file="ch4 resampling/outputdata/rds/nn_inc_10fold_results.RDS")
+# saveRDS(nn_inc_logo_results, file="ch4 resampling/outputdata/rds/nn_inc_logo_results.RDS")
+# saveRDS(nn_inc_lmgo_results, file="ch4 resampling/outputdata/rds/nn_inc_lmgo_results.RDS")
 
 nn_agg_resub_results <- readRDS("ch4 resampling/outputdata/rds/nn_agg_resub_results.RDS")
 nn_agg_2fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_agg_2fold_results.RDS")
@@ -663,12 +664,12 @@ nn_agg_10fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_agg_10fold_re
 nn_agg_logo_results <- readRDS("ch4 resampling/outputdata/rds/nn_agg_logo_results.RDS")
 nn_agg_lmgo_results <- readRDS("ch4 resampling/outputdata/rds/nn_agg_lmgo_results.RDS")
 
-nn_inc_resub_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_resub_results.RDS")
-nn_inc_2fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_2fold_results.RDS")
-nn_inc_5fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_5fold_results.RDS")
-nn_inc_10fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_10fold_results.RDS")
-nn_inc_logo_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_logo_results.RDS")
-nn_inc_lmgo_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_lmgo_results.RDS")
+# nn_inc_resub_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_resub_results.RDS")
+# nn_inc_2fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_2fold_results.RDS")
+# nn_inc_5fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_5fold_results.RDS")
+# nn_inc_10fold_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_10fold_results.RDS")
+# nn_inc_logo_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_logo_results.RDS")
+# nn_inc_lmgo_results <- readRDS("ch4 resampling/outputdata/rds/nn_inc_lmgo_results.RDS")
 ```
 
 For saving results
@@ -704,17 +705,29 @@ pp_agg_results <- function(resultsls, resultsdf, modeltype, groupingstyle){
   } 
   
   if(is.integer(groupingstyle)){ 
-    kftype <- paste0(as.character(groupingstyle), "FOLD")
-    results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
-    # use the kf vector to scramble the unlisted results, to match up with the observations in the results df... no need to do these, because the rownames, or I should say numbers, have been preserved. So, just order
-    index <- as.numeric(row.names(results_unlisted))
-    results_unlisted <- results_unlisted[order(index), ]
-    resultsdf <- cbind(resultsdf, FIT=results_unlisted$pred)
-    resultsdf$RES <- resultsdf$FIT-resultsdf$FLOW
-    colnames(resultsdf)[ncol(resultsdf)-1] <- paste0(kftype, "FIT")
-    colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "RES")
-    resultsdf$KF <- resultsls$kf
-    colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "KF")
+    if(modeltype=="nn"){ # for NN we made a nforstitch column, use that to order instead of the usual way of using rownames
+      kftype <- paste0(as.character(groupingstyle), "FOLD")
+      results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+      results_unlisted <- results_unlisted[order(results_unlisted$nforstitch), ]
+      resultsdf <- cbind(resultsdf, FIT=results_unlisted$pred)
+      resultsdf$RES <- resultsdf$FIT-resultsdf$FLOW
+      colnames(resultsdf)[ncol(resultsdf)-1] <- paste0(kftype, "FIT")
+      colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "RES")
+      resultsdf$KF <- resultsls$kf
+      colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "KF")
+    }else{
+      kftype <- paste0(as.character(groupingstyle), "FOLD")
+      results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+      # use the kf vector to scramble the unlisted results, to match up with the observations in the results df... no need to do these, because the rownames, or I should say numbers, have been preserved. So, just order
+      index <- as.numeric(row.names(results_unlisted))
+      results_unlisted <- results_unlisted[order(index), ]
+      resultsdf <- cbind(resultsdf, FIT=results_unlisted$pred)
+      resultsdf$RES <- resultsdf$FIT-resultsdf$FLOW
+      colnames(resultsdf)[ncol(resultsdf)-1] <- paste0(kftype, "FIT")
+      colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "RES")
+      resultsdf$KF <- resultsls$kf
+      colnames(resultsdf)[ncol(resultsdf)] <- paste0(kftype, "KF")
+    }
   }
   
   if(groupingstyle=="logo"){ # no need to use the unique CDEC_IDs vector to scramble the unlisted results because the original results dataframe is in the same order, so a simple cbind will be OK
@@ -728,15 +741,22 @@ pp_agg_results <- function(resultsls, resultsdf, modeltype, groupingstyle){
   }
   
   if(groupingstyle=="lmgo"){
-    results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
-    index <- as.numeric(row.names(results_unlisted))
-    results_unlisted <- results_unlisted[order(index), ]
-
-    resultsdf <- cbind(resultsdf, LMGOFIT=results_unlisted$pred)
-    resultsdf$LMGORES <- resultsdf$LMGOFIT-resultsdf$FLOW
-    
-    resultsdf <- merge(resultsdf, resultsls$kf, by="CDEC_ID")
-    colnames(resultsdf)[ncol(resultsdf)] <- "LMGOKF"
+    if(modeltype=="nn"){ 
+      results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+      results_unlisted <- results_unlisted[order(results_unlisted$nforstitch), ]
+      resultsdf <- cbind(resultsdf, LMGOFIT=results_unlisted$pred)
+      resultsdf$LMGORES <- resultsdf$LMGOFIT-resultsdf$FLOW
+      resultsdf <- merge(resultsdf, resultsls$kf, by="CDEC_ID")
+      colnames(resultsdf)[ncol(resultsdf)] <- "LMGOKF"
+    } else {
+      results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+      index <- as.numeric(row.names(results_unlisted))
+      results_unlisted <- results_unlisted[order(index), ]
+      resultsdf <- cbind(resultsdf, LMGOFIT=results_unlisted$pred)
+      resultsdf$LMGORES <- resultsdf$LMGOFIT-resultsdf$FLOW
+      resultsdf <- merge(resultsdf, resultsls$kf, by="CDEC_ID")
+      colnames(resultsdf)[ncol(resultsdf)] <- "LMGOKF"
+    }
   }
   
   # now change column names based on modeltype
@@ -747,8 +767,7 @@ pp_agg_results <- function(resultsls, resultsdf, modeltype, groupingstyle){
 }
 
 # first check to see if the dimensions match, examples below
-dim(as.data.frame(do.call("rbind", rf_agg_lmgo_results$results)))[[1]] == dim(results_agg)[[1]]
-dim(as.data.frame(do.call("rbind", rf_inc_lmgo_results$results)))[[1]] == dim(results_inc)[[1]]
+dim(as.data.frame(do.call("rbind", glmtwd_agg_lmgo_results$results)))[[1]] == dim(results_agg)[[1]]
 
 results_agg <- pp_agg_results(lm_agg_resub_results, results_agg, "lm", "resub")
 results_agg <- pp_agg_results(lm_agg_2fold_results, results_agg, "lm", 2L)
@@ -838,6 +857,9 @@ Hmisc::label(gof_all) <- lapply(names(var_labels), function(x) Hmisc::label(gof_
 # for latex documents, put this in appendix
 library(xtable)
 xtable(data.frame(gof_all))
+
+# check results
+gof_all["bR2",]
 ```
 
 ```{r post_processing_gof_by_basins}
@@ -849,7 +871,7 @@ gof_lm_logo_agg <- gof_glm_logo_agg <- gof_rf_logo_agg <- gof_nn_logo_agg <- lis
 gof_lm_lmgo_agg <- gof_glm_lmgo_agg <- gof_rf_lmgo_agg <- gof_nn_lmgo_agg <- list()
 
 for (r in 1:(length(unique(results_agg$CDEC_ID)))){ 
-  h <- unique(results_lm$CDEC_ID)[r]
+  h <- unique(results_agg$CDEC_ID)[r]
   resultsdf_sub <- results_agg[results_agg$CDEC_ID==h,]
   
   gof_lm_resub_agg[[r]] <- gof(resultsdf_sub$LM_RESUBFIT, resultsdf_sub$FLOW, na.rm=TRUE)
