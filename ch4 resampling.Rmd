@@ -272,7 +272,7 @@ glmcv <- function(data, groupingstyle, datatype){
     for (k in 1:groupingstyle) {
       trainset <- data[group != k, ]
       testset <- data[group == k, ]
-      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+      linearmodel[[k]] <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
       predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
@@ -289,7 +289,7 @@ glmcv <- function(data, groupingstyle, datatype){
       h <- unique(data$CDEC_ID)[k]
       testset <- data[data$CDEC_ID==h,]
       trainset <- data[data$CDEC_ID!=h,]
-      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+      linearmodel[[k]] <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
       predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
@@ -312,7 +312,7 @@ glmcv <- function(data, groupingstyle, datatype){
     for (k in 1:nfolds) {
       testset <- data[data$kftrain == k, ]
       trainset <- data[data$kftrain != k, ]
-      linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+      linearmodel[[k]] <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
       predictions <- predict(linearmodel[[k]], testset, type='response')
       results[[k]] <- cbind(obs=testset$FLOW, pred=predictions)
       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
@@ -982,6 +982,726 @@ colnames(gof_rf_lmgo_agg_by_basins) <- unique(results_agg$CDEC_ID)
 colnames(gof_nn_lmgo_agg_by_basins) <- unique(results_agg$CDEC_ID)
   
 remove(names_tbd)
+```
+
+# 6.0 Plots
+
+## 6.1 GOF Comparisons
+```{r mof_comp_plots}
+# plot this table especially for the important errors: RMSE, bR2, NSE, KGE, VE 
+goftablet <- data.frame(t(gof_all))
+goftablet$MODELTYPE <- factor(c("LM", "LM", "LM", "LM", "LM", "LM", "GLM", "GLM", "GLM", "GLM", "GLM", "GLM", "RF", "RF", "RF", "RF", "RF", "RF", "NN", "NN", "NN", "NN", "NN", "NN"), levels= c("LM", "GLM", "RF", "NN"))
+
+png('ch4 resampling/outputdata/rplot41_gof_MSE.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$MSE, decreasing = TRUE),]
+  dotchart(goftablet$MSE, label=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Mean Squared Error (AF^2)", pch=19, xlim=c(min(goftablet$MSE), 1.1*max(goftablet$MSE)), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$MSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$MSE, digits=3, scientific=TRUE), pos=4, cex=1)
+dev.off()
+
+png('ch4 resampling/outputdata/rplot41_gof_RMSE.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$RMSE, decreasing = TRUE),]
+  dotchart(goftablet$RMSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Root Mean Squared Erro (AF)", pch=19, xlim=c(min(goftablet$RMSE), 1.1*max(goftablet$RMSE)), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$RMSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$RMSE, digits=3, scientific=TRUE), pos=4, cex=1)
+dev.off()
+
+png('ch4 resampling/outputdata/rplot41_gof_bR2.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$bR2),]
+  dotchart(goftablet$bR2, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Bias-Corrected Coefficient of Determination (-)", pch=19, xlim=c(0,1.05), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$bR2, y=1:nrow(goftablet), labels=round(goftablet$bR2,2), pos=4, cex=1)
+dev.off()
+
+png('ch4 resampling/outputdata/rplot41_gof_NSE.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$NSE),]
+  dotchart(goftablet$NSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Nash-Sutcliffe Efficiency (-)", pch=19, xlim=c(min(goftablet$NSE), 1.0), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$NSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$NSE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+
+png('ch4 resampling/outputdata/rplot41_gof_KGE.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$KGE),]
+  dotchart(goftablet$KGE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Kling-Gupta Efficiency (-)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$KGE), 1.1), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$KGE, y=1:nrow(goftablet), labels=prettyNum(goftablet$KGE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+
+png('ch4 resampling/outputdata/rplot41_gof_VE.png', width=6.5, height=4, units="in", pointsize=8, res=1200)
+  par(mar=c(4,4,1,1)+0.1, cex=1)
+  goftablet <- goftablet[order(goftablet$VE),]
+  dotchart(goftablet$VE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Volumetric Efficiency (AF)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$VE), 1), color= cbpblack[5:8][goftablet$MODELTYPE])
+  text(x=goftablet$VE, y=1:nrow(goftablet), labels=prettyNum(goftablet$VE, digits=3, scientific=FALSE), pos=4, cex=1)
+dev.off()
+```
+
+```{r obsvpred_plots}
+# color by resampling method plot
+obsvpredplot <- function(resultsdf, modeltype, legendpos){
+  resubfit <- paste0(toupper(modeltype), "_RESUBFIT")
+  twofoldfit <- paste0(toupper(modeltype), "_2FOLDFIT")
+  fivefoldfit <- paste0(toupper(modeltype), "_5FOLDFIT")
+  tenfoldfit <- paste0(toupper(modeltype), "_10FOLDFIT")
+  logofit <- paste0(toupper(modeltype), "_LOGOFIT")
+  lmgofit <- paste0(toupper(modeltype), "_LMGOFIT")
+
+  # find y and x limits
+  xlower <- min(resultsdf$FLOW, na.rm=TRUE)
+  xupper <- max(resultsdf$FLOW, na.rm=TRUE)
+  ylower <- min(resultsdf[ , lmgofit], na.rm=TRUE)
+  yupper <- max(resultsdf[ , lmgofit], na.rm=TRUE)
+  xylower <- min(xlower, ylower)
+  xyupper <- max(xupper, yupper)
+  
+  png(paste0('ch4 resampling/outputdata/rplot42_obsvspred_', modeltype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,3)+0.1, cex=1)
+    plot(resultsdf$FLOW, resultsdf[ , resubfit], col=cbpblack[2], xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+    abline(0,1, col="grey70", lty=3, lwd=2)
+    points(resultsdf$FLOW, resultsdf[ , twofoldfit], col=cbpblack[3], pch=19)
+    points(resultsdf$FLOW, resultsdf[ , fivefoldfit], col=cbpblack[4], pch=19)
+    points(resultsdf$FLOW, resultsdf[ , tenfoldfit], col=cbpblack[5], pch=19)
+    points(resultsdf$FLOW, resultsdf[ , logofit], col=cbpblack[6], pch=19)
+    points(resultsdf$FLOW, resultsdf[ , lmgofit], col=cbpblack[7], pch=19)
+    legend(legendpos, horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, legend=c("RESUB", "2FOLD", "5 FOLD", "10FOLD", "LOGO", "LMGO"), title= "Resampling Method", pch=19, col=cbpblack[2:7], bg="grey96", box.lty=0, xpd=TRUE, xjust=1, title.adj=0)
+  dev.off()
+}
+
+obsvpredplot(results_agg, "lm", "topleft") 
+obsvpredplot(results_agg, "glm", "topleft") 
+obsvpredplot(results_agg, "rf", "topleft") 
+obsvpredplot(results_agg, "nn", "topleft") 
+```
+
+```{r obsvpredplot_forpaper}
+# # when you have picked what models to show, use this
+# png('ch4 resampling/outputdata/rplot47_obsvspred_all.png', width=6.5, height=8, units="in", pointsize=8, res=1200)
+#   op <- par(mfrow = c(4, 2),     # 4x2 layout
+#         oma = c(5, 4, 5, 5),     # two rows of text at the outer left and bottom margin
+#         mar = c(1, 1, 1, 1)+0.1, # space for one row of text at ticks and to separate plots
+#         mgp = c(2, 1, 0),        # axis label at 2 rows distance, tick labels at 1 row
+#         xpd = FALSE)             # allow content to protrude into outer margin (and beyond)
+#     
+#   # par(mfrow = c(4,2), oma = c(2,2,0,0), mar = c(1,1,0,0))
+#   
+#   # find y and x limits
+#   xlower <- min(results_all$FLOW, na.rm=TRUE)
+#   xupper <- max(results_all$FLOW, na.rm=TRUE)
+#   ylower <- min(results_all$LMLOGOFIT, na.rm=TRUE)
+#   yupper <- max(results_all$LMLOGOFIT, na.rm=TRUE)
+#   xylower <- min(xlower, ylower)
+#   xyupper <- max(xupper, yupper)
+#   
+#   plot(results_all$FLOW, results_all$LMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$LMLOGOFIT~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   mtext("Aggregate", side=3, line=1)
+#   
+#   plot(results_all$FLOW, results_all$LMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$LMLOGOFIT_AGG~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   mtext("Incremental", side=3, line=1)
+#   mtext("LM", side=4, line=1)
+#   
+#   plot(results_all$FLOW, results_all$GLMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$GLMLOGOFIT~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   
+#   plot(results_all$FLOW, results_all$GLMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$GLMLOGOFIT_AGG~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   mtext("GLM", side=4, line=1)
+#   
+#   plot(results_all$FLOW, results_all$RFLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$RFLOGOFIT~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   
+#   plot(results_all$FLOW, results_all$RFLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$RFLOGOFIT_AGG~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   mtext("RF", side=4, line=1)
+#   
+#   plot(results_all$FLOW, results_all$NNLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$NNLOGOFIT~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), c("Y = X line", "Regression line"), lty=c(3,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="white", box.lty=0)
+#   
+#   plot(results_all$FLOW, results_all$NNLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
+#   abline(0,1, col="grey70", lty=3, lwd=2)
+#   lmline <- lm(results_all$NNLOGOFIT_AGG~results_all$FLOW)
+#   abline(lmline, col=cbpblack[8])
+#   mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
+#   # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
+#   mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
+#   mtext("NN", side=4, line=1)
+#   legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), legend=c(1:5), title= "Basin \nHierarchy", pch=19, col=cbpblack[2:6], bg="white", box.lty=0, xjust=1, title.adj=0)
+#   title(xlab = "Observed Unimpaired Flow (AF/m)", ylab = "Predicted Unimpaired Flow (AF/m)", outer = TRUE, line = 2)
+#   par(op)
+# dev.off()
+```
+
+```{r error_density_plots}
+# not done yet
+# density plots of obs and pred data
+
+densityplot <- function(resultsdf, modeltype, legendpos){
+  resubfit <- paste0(toupper(modeltype), "_RESUBFIT")
+  twofoldfit <- paste0(toupper(modeltype), "_2FOLDFIT")
+  fivefoldfit <- paste0(toupper(modeltype), "_5FOLDFIT")
+  tenfoldfit <- paste0(toupper(modeltype), "_10FOLDFIT")
+  logofit <- paste0(toupper(modeltype), "_LOGOFIT")
+  lmgofit <- paste0(toupper(modeltype), "_LMGOFIT")
+  
+  png(paste0('ch4 resampling/outputdata/rplot43_density_', modeltype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,3)+0.1, cex=1)
+    plot(density(resultsdf$FLOW), main="")
+    rug(jitter(resultsdf$FLOW))
+    lines(density(resultsdf[, resubfit], na.rm = TRUE), col=cbpblack[2])
+    lines(density(resultsdf[ , twofoldfit], na.rm = TRUE), col=cbpblack[3])
+    lines(density(resultsdf[ , fivefoldfit], na.rm = TRUE), col=cbpblack[4])
+    lines(density(resultsdf[ , tenfoldfit], na.rm = TRUE), col=cbpblack[5])
+    lines(density(resultsdf[ , logofit], na.rm = TRUE), col=cbpblack[6])
+    lines(density(resultsdf[ , lmgofit], na.rm = TRUE), col=cbpblack[7])
+    legend(legendpos, horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, legend=c("RESUB", "2FOLD", "5 FOLD", "10FOLD", "LOGO", "LMGO"), title= "Resampling Method", lty=1, col=cbpblack[2:7], bg="grey96", box.lty=0, xpd=TRUE, xjust=1, title.adj=0)
+  dev.off()
+}
+
+densityplot(results_agg, "lm", "topright") 
+densityplot(results_agg, "glm", "topright") 
+densityplot(results_agg, "rf", "topright") 
+densityplot(results_agg, "nn", "topright") 
+
+# zoom in
+densityplot2 <- function(resultsdf, modeltype, legendpos){
+  resubfit <- paste0(toupper(modeltype), "_RESUBFIT")
+  twofoldfit <- paste0(toupper(modeltype), "_2FOLDFIT")
+  fivefoldfit <- paste0(toupper(modeltype), "_5FOLDFIT")
+  tenfoldfit <- paste0(toupper(modeltype), "_10FOLDFIT")
+  logofit <- paste0(toupper(modeltype), "_LOGOFIT")
+  lmgofit <- paste0(toupper(modeltype), "_LMGOFIT")
+  
+  png(paste0('ch4 resampling/outputdata/rplot44_density_', modeltype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+    par(mar=c(4,4,3,3)+0.1, cex=1)
+    plot(density(resultsdf$FLOW), main="", xlim=c(0,5e5))
+    rug(jitter(resultsdf$FLOW))
+    lines(density(resultsdf[, resubfit], na.rm = TRUE), col=cbpblack[2])
+    lines(density(resultsdf[ , twofoldfit], na.rm = TRUE), col=cbpblack[3])
+    lines(density(resultsdf[ , fivefoldfit], na.rm = TRUE), col=cbpblack[4])
+    lines(density(resultsdf[ , tenfoldfit], na.rm = TRUE), col=cbpblack[5])
+    lines(density(resultsdf[ , logofit], na.rm = TRUE), col=cbpblack[6])
+    lines(density(resultsdf[ , lmgofit], na.rm = TRUE), col=cbpblack[7])
+    legend(legendpos, horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, legend=c("RESUB", "2FOLD", "5 FOLD", "10FOLD", "LOGO", "LMGO"), title= "Resampling Method", lty=1, col=cbpblack[2:7], bg="grey96", box.lty=0, xpd=TRUE, xjust=1, title.adj=0)
+  dev.off()
+}
+
+densityplot2(results_agg, "lm", "topright") 
+densityplot2(results_agg, "glm", "topright") 
+densityplot2(results_agg, "rf", "topright") 
+densityplot2(results_agg, "nn", "topright") 
+
+library(reshape2)
+densityplot3 <- function(resultsdf, modeltype){
+  resubfit <- paste0(toupper(modeltype), "_RESUBFIT")
+  twofoldfit <- paste0(toupper(modeltype), "_2FOLDFIT")
+  fivefoldfit <- paste0(toupper(modeltype), "_5FOLDFIT")
+  tenfoldfit <- paste0(toupper(modeltype), "_10FOLDFIT")
+  logofit <- paste0(toupper(modeltype), "_LOGOFIT")
+  lmgofit <- paste0(toupper(modeltype), "_LMGOFIT")
+  results_all_melted <- melt(resultsdf[,c("DATE", "CDEC_ID", "FLOW", resubfit, twofoldfit, fivefoldfit, tenfoldfit, logofit, lmgofit)], id.vars=c("DATE", "CDEC_ID"))
+  results_all_melted <- na.omit(results_all_melted)  
+  
+  png(paste0('ch4 resampling/outputdata/rplot45_density_', modeltype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
+  ggplot(results_all_melted, aes(x = value), alpha = 0.2) +
+    geom_density(aes(color = variable)) +
+    ylim(0, 1.5e-5) +
+    xlim(0, 4e6) +
+    scale_color_manual(values=c(cbpblack, cbpgrey[1]))+
+    theme_bw()
+  dev.off()
+}
+
+densityplot3(results_agg, "lm") 
+densityplot3(results_agg, "glm") 
+densityplot3(results_agg, "rf") 
+densityplot3(results_agg, "nn") 
+```
+
+```{r error_mapplots}
+# modeltype can be: "lm", "glm", "rf", "nn"
+library(RColorBrewer)
+library(lattice)
+library(grid)
+
+br2map <- function(gof_results, modelform, groupingstyle, datatype){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
+
+  png(paste0('ch4 resampling/outputdata/rplot46_br2map_', modelform, "_", groupingstyle, "_", datatype , '.png'), width=3.25, height=3, units="in", pointsize=8, res=1200)
+  par(mar=c(0,0,0,0)+0.1, cex=1)
+  mycolors <- colorRampPalette(c(cbpblack[2],cbpblack[4],cbpblack[6]))
+  tbdspplot <- spplot(basinsc["bR2"], cex=0.8, sp.layout=counties, col.regions = mycolors(100), colorkey = list(right = list( # see ?levelplot in package trellis, argument colorkey:
+                      fun = draw.colorkey, 
+                      args = list(
+                             key = list(
+                                  at = seq(0, 1.0, 1/100), # colour breaks
+                                  col = mycolors(100), # colours
+                                  labels = list(
+                                      at = seq(0, 1.0, 0.2),
+                                      labels = seq(0, 1.0, 0.2)
+                                      )
+                                   )
+                              )
+                      )
+          )
+  )
+  print(tbdspplot)
+  grid.text("bR2(-)", 0.65, 0.88)
+  dev.off()
+}
+
+br2map(gof_lm_resub_agg_by_basins, "lm", "resub", "agg")
+br2map(gof_lm_2fold_agg_by_basins, "lm", "2fold", "agg")
+br2map(gof_lm_5fold_agg_by_basins, "lm", "5fold", "agg")
+br2map(gof_lm_10fold_agg_by_basins, "lm", "10fold", "agg")
+br2map(gof_lm_logo_agg_by_basins, "lm", "logo", "agg")
+br2map(gof_lm_lmgo_agg_by_basins, "lm", "lmgo", "agg")
+
+br2map(gof_glm_resub_agg_by_basins, "glm", "resub", "agg")
+br2map(gof_glm_2fold_agg_by_basins, "glm", "2fold", "agg")
+br2map(gof_glm_5fold_agg_by_basins, "glm", "5fold", "agg")
+br2map(gof_glm_10fold_agg_by_basins, "glm", "10fold", "agg")
+br2map(gof_glm_logo_agg_by_basins, "glm", "logo", "agg")
+br2map(gof_glm_lmgo_agg_by_basins, "glm", "lmgo", "agg")
+
+br2map(gof_rf_resub_agg_by_basins, "rf", "resub", "agg")
+br2map(gof_rf_2fold_agg_by_basins, "rf", "2fold", "agg")
+br2map(gof_rf_5fold_agg_by_basins, "rf", "5fold", "agg")
+br2map(gof_rf_10fold_agg_by_basins, "rf", "10fold", "agg")
+br2map(gof_rf_logo_agg_by_basins, "rf", "logo", "agg")
+br2map(gof_rf_lmgo_agg_by_basins, "rf", "lmgo", "agg")
+
+br2map(gof_nn_resub_agg_by_basins, "nn", "resub", "agg")
+br2map(gof_nn_2fold_agg_by_basins, "nn", "2fold", "agg")
+br2map(gof_nn_5fold_agg_by_basins, "nn", "5fold", "agg")
+br2map(gof_nn_10fold_agg_by_basins, "nn", "10fold", "agg")
+br2map(gof_nn_logo_agg_by_basins, "nn", "logo", "agg")
+br2map(gof_nn_lmgo_agg_by_basins, "nn", "lmgo", "agg")
+```
+
+```{r error_hierarchy_plots}
+# plot errors by location in the hierarchy
+# datatype can be: "agg", "cagg", "inc", "cinc"
+# fitofinterest can be anything returned by the gof function
+
+# # first let's make a dataframe with all the different grouping styles
+# gof_lm_resub_agg_by_basins$GROUPINGSTYLE <- "resub" 
+# gof_lm_2fold_agg_by_basins$GROUPINGSTYLE <- "2fold"
+# gof_lm_5fold_agg_by_basins$GROUPINGSTYLE <- "5fold"
+# gof_lm_10fold_agg_by_basins$GROUPINGSTYLE <- "10fold"
+# gof_lm_logo_agg_by_basins$GROUPINGSTYLE <- "logo"
+# gof_lm_lmgo_agg_by_basins$GROUPINGSTYLE <- "lmgo"
+# 
+# gof_glm_resub_agg_by_basins$GROUPINGSTYLE <- "resub" 
+# gof_glm_2fold_agg_by_basins$GROUPINGSTYLE <- "2fold"
+# gof_glm_5fold_agg_by_basins$GROUPINGSTYLE <- "5fold"
+# gof_glm_10fold_agg_by_basins$GROUPINGSTYLE <- "10fold"
+# gof_glm_logo_agg_by_basins$GROUPINGSTYLE <- "logo"
+# gof_glm_lmgo_agg_by_basins$GROUPINGSTYLE <- "lmgo"
+# 
+# gof_rf_resub_agg_by_basins$GROUPINGSTYLE <- "resub" 
+# gof_rf_2fold_agg_by_basins$GROUPINGSTYLE <- "2fold"
+# gof_rf_5fold_agg_by_basins$GROUPINGSTYLE <- "5fold"
+# gof_rf_10fold_agg_by_basins$GROUPINGSTYLE <- "10fold"
+# gof_rf_logo_agg_by_basins$GROUPINGSTYLE <- "logo"
+# gof_rf_lmgo_agg_by_basins$GROUPINGSTYLE <- "lmgo"
+# 
+# gof_nn_resub_agg_by_basins$GROUPINGSTYLE <- "resub" 
+# gof_nn_2fold_agg_by_basins$GROUPINGSTYLE <- "2fold"
+# gof_nn_5fold_agg_by_basins$GROUPINGSTYLE <- "5fold"
+# gof_nn_10fold_agg_by_basins$GROUPINGSTYLE <- "10fold"
+# gof_nn_logo_agg_by_basins$GROUPINGSTYLE <- "logo"
+# gof_nn_lmgo_agg_by_basins$GROUPINGSTYLE <- "lmgo"
+# 
+# # make all dataframes into long format
+# melt(gof_lm_resub_agg_by_basins, id.vars=c("subject", "sex"))
+# gof_results_all <- 
+  
+# groupingstyle comparisons
+gofdotchart <- function(gof_results_resub, gof_results_2fold, gof_results_5fold, gof_results_10fold, gof_results_logo, gof_results_lmgo, modeltype, fitofinterest, legendpos){
+  tgof_results_resub <- data.frame(t(gof_results_resub))
+  tgof_results_resub$CDEC_ID <- rownames(tgof_results_resub)
+  basinsc <- basins_points@data
+  basinsc <- merge(basinsc, tgof_results_resub, by="CDEC_ID", all=TRUE)
+  
+  tgof_results_2fold <- data.frame(t(gof_results_2fold))
+  tgof_results_2fold$CDEC_ID <- rownames(tgof_results_2fold)
+  basinsc2 <- basins_points@data
+  basinsc2 <- merge(basinsc2, tgof_results_2fold, by="CDEC_ID", all=TRUE)
+  
+  tgof_results_5fold <- data.frame(t(gof_results_5fold))
+  tgof_results_5fold$CDEC_ID <- rownames(tgof_results_5fold)
+  basinsc3 <- basins_points@data
+  basinsc3 <- merge(basinsc3, tgof_results_5fold, by="CDEC_ID", all=TRUE)
+  
+  tgof_results_10fold <- data.frame(t(gof_results_10fold))
+  tgof_results_10fold$CDEC_ID <- rownames(tgof_results_10fold)
+  basinsc4 <- basins_points@data
+  basinsc4 <- merge(basinsc4, tgof_results_10fold, by="CDEC_ID", all=TRUE)
+  
+  tgof_results_logo <- data.frame(t(gof_results_logo))
+  tgof_results_logo$CDEC_ID <- rownames(tgof_results_logo)
+  basinsc5 <- basins_points@data
+  basinsc5 <- merge(basinsc5, tgof_results_logo, by="CDEC_ID", all=TRUE)
+  
+  tgof_results_lmgo <- data.frame(t(gof_results_lmgo))
+  tgof_results_lmgo$CDEC_ID <- rownames(tgof_results_lmgo)
+  basinsc6 <- basins_points@data
+  basinsc6 <- merge(basinsc6, tgof_results_lmgo, by="CDEC_ID", all=TRUE)
+
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc2$HIERARCHY <- (basinsc2$STATIONS_ABOVE1!="none") + (basinsc2$STATIONS_ABOVE2!="none") + (basinsc2$STATIONS_ABOVE3!="none") + (basinsc2$STATIONS_ABOVE4!="none") + 1
+  basinsc3$HIERARCHY <- (basinsc3$STATIONS_ABOVE1!="none") + (basinsc3$STATIONS_ABOVE2!="none") + (basinsc3$STATIONS_ABOVE3!="none") + (basinsc3$STATIONS_ABOVE4!="none") + 1
+  basinsc4$HIERARCHY <- (basinsc4$STATIONS_ABOVE1!="none") + (basinsc4$STATIONS_ABOVE2!="none") + (basinsc4$STATIONS_ABOVE3!="none") + (basinsc4$STATIONS_ABOVE4!="none") + 1
+  basinsc5$HIERARCHY <- (basinsc5$STATIONS_ABOVE1!="none") + (basinsc5$STATIONS_ABOVE2!="none") + (basinsc5$STATIONS_ABOVE3!="none") + (basinsc5$STATIONS_ABOVE4!="none") + 1
+  basinsc6$HIERARCHY <- (basinsc6$STATIONS_ABOVE1!="none") + (basinsc6$STATIONS_ABOVE2!="none") + (basinsc6$STATIONS_ABOVE3!="none") + (basinsc6$STATIONS_ABOVE4!="none") + 1
+  
+  basinsc5 <- basinsc5[order(basinsc5[, fitofinterest], decreasing=TRUE), ]
+
+  basinsm <- merge(basinsc2, basinsc, by="CDEC_ID")
+  basinsm <- basinsm[order(basinsm[, paste0(fitofinterest, ".x")], decreasing=TRUE), ]
+  tbdmin <- basinsm[, paste0(fitofinterest, ".x")]
+  tbdmin <- tbdmin[which(tbdmin>-Inf)]
+  minxlim <- min(tbdmin, na.rm = TRUE)
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "ME.x"], na.rm=TRUE), 1.1*max(basinsm[, "ME.y"], na.rm=TRUE))
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "MAE.x"], na.rm=TRUE), 1.1*max(basinsm[, "MAE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- max(1.1*max(basinsm[, "MSE.x"], na.rm=TRUE), 1.1*max(basinsm[, "MSE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- max(1.1*max(basinsm[, "RMSE.x"], na.rm=TRUE), 1.1*max(basinsm[, "RMSE.y"], na.rm=TRUE))
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- max(1.1*max(basinsm[, "NRMSE...x"], na.rm=TRUE), 1.1*max(basinsm[, "NRMSE...y"], na.rm=TRUE))
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- max(1.4*max(basinsm[, "PBIAS...x"], na.rm=TRUE), 1.4*max(basinsm[, "PBIAS...y"], na.rm=TRUE))
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 10
+    # minxlim <- 7*minxlim
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- max(1.1*max(basinsm[, "rSD.x"], na.rm=TRUE), 1.1*max(basinsm[, "rSD.y"], na.rm=TRUE))
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- max(1.05*max(basinsm[, "d.x"], na.rm=TRUE), 1.05*max(basinsm[, "d.y"], na.rm=TRUE))
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- max(1.1*max(basinsm[, "md.x"], na.rm=TRUE), 1.1*max(basinsm[, "md.y"], na.rm=TRUE))
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- max(1.1*max(basinsm[, "r.x"], na.rm=TRUE), 1.1*max(basinsm[, "r.y"], na.rm=TRUE))
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+    minxlim <- -0.05
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  png(paste0('ch4 resampling/outputdata/rplot47_', modeltype, "_", fitofinterest, 'dotchart_comp.png'), width=6.5, height=8, units="in", pointsize=8, res=1200)
+    dotchart(basinsm[, paste0(fitofinterest, ".x")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=19, color="black", xlim=c(minxlim, maxxlim))
+    mtext("Basin Hierarchies", side=2, line=2, cex=0.8)
+    # to allow over plotting
+    par(new=TRUE)
+    basinsm$mycol <- as.integer(basinsm[, paste0(fitofinterest, ".y")]>basinsm[, paste0(fitofinterest, ".x")])+7
+    mycol <- cbpblack[basinsm$mycol]
+    dotchart(basinsm[, paste0(fitofinterest, ".y")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=2, xlim=c(minxlim, maxxlim), col=mycol)
+    legend(legendpos, pch=c(19,2,2,2), c("inc", "agg", "agg>inc", "inc>agg"), col=c("black", "black", cbpblack[8], cbpblack[7]), bg="grey96", horiz=FALSE, inset=c(0.01, 0.01), cex=0.8, box.lty=0)
+  dev.off()
+}
+
+gofdotchart(gof_lm_resub_agg_by_basins, gof_lm_2fold_agg_by_basins, gof_lm_5fold_agg_by_basins, gof_lm_10fold_agg_by_basins, gof_lm_logo_agg_by_basins, gof_lm_lmgo_agg_by_basins, "bR2", "topright")
+gofdotchart(gof_glm_resub_agg_by_basins, gof_glm_2fold_agg_by_basins, gof_glm_5fold_agg_by_basins, gof_glm_10fold_agg_by_basins, gof_glm_logo_agg_by_basins, gof_glm_lmgo_agg_by_basins, "bR2", "topright")
+gofdotchart(gof_rf_resub_agg_by_basins, gof_rf_2fold_agg_by_basins, gof_rf_5fold_agg_by_basins, gof_rf_10fold_agg_by_basins, gof_rf_logo_agg_by_basins, gof_rf_lmgo_agg_by_basins, "bR2", "topright")
+gofdotchart(gof_nn_resub_agg_by_basins, gof_nn_2fold_agg_by_basins, gof_nn_5fold_agg_by_basins, gof_nn_10fold_agg_by_basins, gof_nn_logo_agg_by_basins, gof_nn_lmgo_agg_by_basins, "bR2", "topright")
+```
+
+```{r boxplot}
+gofboxplot <- function(gof_results, datatype, modelform, fitofinterest){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results))
+  results$CDEC_ID <- rownames(results)
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
+  basinsc <- basinsc@data[order(basinsc@data[, fitofinterest], decreasing=TRUE), ]
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc$GRPS <- as.factor(basinsc$HIERARCHY)
+  basinsc <- basinsc[order(basinsc[, fitofinterest], decreasing=TRUE), ]
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 500
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  plottoprint <- ggplot(basinsc, aes(x=GRPS, y=basinsc[,fitofinterest], fill=GRPS))+
+      geom_boxplot(outlier.shape=NA, alpha=0.3) +
+      geom_jitter(shape=16, position=position_jitter(0.1)) +
+      coord_flip() +
+      theme_bw(base_size = 8) +
+      ylab(fitofinterestlabel) +
+      xlab("Basin Hierarchy") +
+      scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
+      scale_color_manual(values=cbpblack[2:6]) +
+      theme(legend.position="none")
+  
+  png(paste0('ch4 resampling/outputdata/rplot412_', fitofinterest, "gofboxplot_", modelform, "_", datatype, '.png'), width=6.5, height=1.8, units="in", pointsize=8, res=1200)
+    par(mar=c(0,0,0,0)+0.1, cex=1)
+    print(plottoprint)
+  dev.off()
+}
+
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "ME")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MAE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RMSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NRMSE..")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "PBIAS..")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RSR")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rSD")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "mNSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rNSE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "d")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "md")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rd")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "cp")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "r")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "R2")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "bR2")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "KGE")
+# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "VE")
+
+gofboxplot2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendpos){ 
+  basinsc <- basins_points
+  results <- data.frame(t(gof_results_agg))
+  results$CDEC_ID <- rownames(results)
+  
+  results2 <- data.frame(t(gof_results_inc))
+  results2$CDEC_ID <- rownames(results2)
+  
+  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE) # the .x s are the agg basins, the .y s are the inc
+  basinsc <- merge(basinsc, results2, by="CDEC_ID", all=TRUE)
+  
+  basinsc <- basinsc@data[order(basinsc@data[, paste0(fitofinterest, ".y")], decreasing=TRUE), ]
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc$GRPS <- as.factor(basinsc$HIERARCHY)
+  basinsc <- basinsc[order(basinsc[, paste0(fitofinterest, ".y")], decreasing=TRUE), ]
+  
+  if(fitofinterest=="ME"){
+    fitofinterestlabel <- "Mean Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
+  } else if(fitofinterest=="MAE"){
+    fitofinterestlabel <- "Mean Absolute Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
+  } else if(fitofinterest=="MSE"){
+    fitofinterestlabel <- "Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
+  } else if(fitofinterest=="RMSE"){
+    fitofinterestlabel <- "Root Mean Squared Error (AF)"
+    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
+  } else if(fitofinterest=="NRMSE.."){
+    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
+    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
+  } else if(fitofinterest=="PBIAS.."){
+    fitofinterestlabel <- "Percent Bias (-)"
+    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
+  } else if(fitofinterest=="RSR"){
+    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
+    maxxlim <- 67
+  } else if(fitofinterest=="NSE"){
+    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 500
+  } else if(fitofinterest=="rSD"){
+    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
+    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
+  } else if(fitofinterest=="mNSE"){
+    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5
+  } else if(fitofinterest=="rNSE"){
+    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
+    maxxlim <- 5e5
+  } else if(fitofinterest=="d"){
+    fitofinterestlabel <- "Index of Agreement (-)"
+    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
+  } else if(fitofinterest=="md"){
+    fitofinterestlabel <- "Modified Index of Agreement (-)"
+    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
+  } else if(fitofinterest=="rd"){
+    fitofinterestlabel <- "Relative Index of Agreement (-)"
+    maxxlim <- 100
+  } else if(fitofinterest=="cp"){
+    fitofinterestlabel <- "Persistence Index (-)"
+    maxxlim <- 200
+  } else if(fitofinterest=="r"){
+    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
+    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
+  } else if(fitofinterest=="R2"){
+    fitofinterestlabel <- "Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="bR2"){
+    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
+    maxxlim <- 1.0
+  } else if(fitofinterest=="KGE"){
+    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
+    maxxlim <- 10
+  } else if(fitofinterest=="VE"){
+    fitofinterestlabel <- "Volumetric Efficiency (AF)"
+    maxxlim <- 6
+  } else{
+    print("Input a measure of fit provided by the gof function in HydroGOF package!")
+  }
+  
+  basinsc2 <- melt(basinsc[,c("CDEC_ID", "GRPS", paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y"))], id.vars = c("CDEC_ID", "GRPS"), measure.vars = c(paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y")))
+  plottoprint <- ggplot(basinsc2, aes(x=GRPS, y=value, fill=variable))+
+      geom_boxplot(outlier.shape=NA, alpha=0.3, position=position_dodge(1)) +
+      geom_point(position=position_dodge(width=1), aes(group=variable, col=variable), show.legend=FALSE) +
+      # geom_jitter(shape=16, position=position_jitter(0.1), aes(group=variable)) +
+      coord_flip() +
+      theme_bw(base_size = 8) +
+      ylab(fitofinterestlabel) +
+      xlab("Basin Hierarchy") +
+      scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
+      scale_color_manual(values=cbpblack[7:8]) +
+      theme(legend.title = element_blank(), legend.text=element_text(size=10), text=element_text(size=10)) +
+      scale_fill_discrete(labels=c("agg", "inc"))
+  
+  png(paste0('ch4 resampling/outputdata/rplot412_', fitofinterest, "gofboxplot_comp.png"), width=6.5, height=4, units="in", pointsize=8, res=1200)
+    par(mar=c(0,0,0,0)+0.1, cex=1)
+    print(plottoprint)
+  dev.off()
+}
+
+# gofboxplot2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2", "topright")
+gofboxplot2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
 ```
 
 
