@@ -3099,4 +3099,347 @@ gofboxplot2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendp
 gofboxplot2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
 ```
 
+# 9.0 Variable Importance Plots 
+```{r vip_prep}
+# the models need to be saved, so run the modeling again
 
+# # NN, best model with no preprocessing is NN LOGO AGG
+trainingdim <- dim(df_lm_agg[,c(15,18:(ncol(df_lm_agg)-1))])
+# nnmodel <- keras_model_sequential() %>%
+#   layer_dense(units=64, activation="relu", input_shape=trainingdim[[2]]) %>%
+#   layer_dense(units=64, activation="relu") %>%
+#   layer_dense(units=1) # number of outputs, here we just want one prediction
+# 
+# nnmodel %>% # to compile the model, loss functions are defined here
+#   compile(optimizer="rmsprop", loss=keras::loss_mean_squared_error, metrics=c("mae"))
+# 
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+#   trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+#   testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+#   trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+#   testsetrv <- as.matrix(testset$FLOW)
+#   trainsetrv <- as.matrix(trainset$FLOW)
+# 
+#   nnmodel %>%
+#     fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+#   predictions <- nnmodel %>% predict(testsetpvs)
+#   predictions <- predictions[ , 1]
+# 
+#   nnmodel %>% save_model_hdf5(paste0("ch2 data transformations/outputdata/vi_saved_mods/nn_hdf5/nn_", h, ".h5"))
+# }
+
+# LM
+linearmodel <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
+}
+
+# GLM
+glinearmodel <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  glinearmodel[[k]] <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+}
+
+# # RF
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+#   trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+#   rfmodel <- randomForest(FLOW~., data=trainset[,c(15,18:ncol(trainset))], mtry=20)
+#   saveRDS(rfmodel, paste0("ch2 data transformations/outputdata/vi_saved_mods/rf_rds/rf_", h, ".rds"))
+# }
+```
+
+```{r vip}
+library(vip)
+library(ggplot2)
+
+## NN
+pred_wrapper <- function(object, newdata) {
+  predict(object, x = as.matrix(newdata)) %>%
+    as.vector()
+}
+
+nnvip <- list()
+nnmodel <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+  trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+  testsetrv <- as.matrix(testset$FLOW)
+  trainsetrv <- as.matrix(trainset$FLOW)
+  
+  modfilename <- paste0("ch2 data transformations/outputdata/vi_saved_mods/nn_hdf5/nn_", h, ".h5")
+  nnmodel[[k]] <- load_model_hdf5(modfilename, compile=FALSE)
+
+  nnvip[[k]] <- vip(
+    object = nnmodel[[k]],                                     # fitted model
+    method = "permute",                                        # permutation-based VI scores
+    num_features = trainingdim[2],                             # default only plots top 10 features
+    pred_wrapper = pred_wrapper(nnmodel[[k]], testsetpvs),     # user-defined prediction function
+    train = as.data.frame(trainsetpvs),                        # training data
+    target = trainsetrv,                                       # response values used for training
+    metric = "rsquared",                                       # evaluation metric
+    # progress = "text"                                        # request a text-based progress bar
+    )
+}
+
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   png(paste0("ch2 data transformations/outputdata/vip/nn/vip_testset_", h, ".png"), width=6.5, height=8, units="in", pointsize=8, res=1200)
+#     print(nnvip[[k]], bar=FALSE, shape=19, horizontal=TRUE) + theme_bw()
+#   dev.off()
+# }
+
+# LM
+lmvip <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  testsetpvs <- testset[,c(15,18:(ncol(testset)-1))]
+  trainsetpvs <- trainset[,c(15,18:(ncol(trainset)-1))]
+  testsetrv <- testset$FLOW
+  trainsetrv <- trainset$FLOW
+  
+  lmvip[[k]] <- vip(
+    object = linearmodel[[k]],                      # fitted model
+    method = "model",                    # model-based VI scores, vip recognizes some model types
+    num_features = trainingdim[2],         # default only plots top 10 features
+    pred_wrapper = pred_wrapper(linearmodel[[k]], testsetpvs),               # user-defined prediction function
+    train = as.data.frame(trainsetpvs),    # training data
+    target = trainsetrv,                   # response values used for training
+    metric = "r2",                   # evaluation metric
+    task = "regression"
+    # progress = "text"                    # request a text-based progress bar
+    )
+}
+
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   png(paste0("ch2 data transformations/outputdata/vip/lm/vip_testset_", h, ".png"), width=6.5, height=8, units="in", pointsize=8, res=1200)
+#     print(lmvip[[k]], bar=FALSE, shape=19, horizontal=TRUE) + theme_bw()
+#   dev.off()
+# }
+
+# GLM
+glmvip <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  testsetpvs <- testset[,c(15,18:(ncol(testset)-1))]
+  trainsetpvs <- trainset[,c(15,18:(ncol(trainset)-1))]
+  testsetrv <- testset$FLOW
+  trainsetrv <- trainset$FLOW
+  
+  glmvip[[k]] <- vip(
+    object = glinearmodel[[k]],                                     # fitted model
+    method = "model",                                               # model-based VI scores, vip recognizes some model types
+    num_features = trainingdim[2],                                  # default only plots top 10 features
+    pred_wrapper = pred_wrapper(glinearmodel[[k]], testsetpvs),     # user-defined prediction function
+    train = as.data.frame(trainsetpvs),                             # training data
+    target = trainsetrv,                                            # response values used for training
+    metric = "r2",                                                  # evaluation metric
+    task = "regression"
+    # progress = "text"                                             s# request a text-based progress bar
+    )
+}
+
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   png(paste0("ch2 data transformations/outputdata/vip/glm/vip_testset_", h, ".png"), width=6.5, height=8, units="in", pointsize=8, res=1200)
+#     print(glmvip[[k]], bar=FALSE, shape=19, horizontal=TRUE) + theme_bw()
+#   dev.off()
+# }
+
+# RF 
+rfvip <- list()
+rfmodel <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  testsetpvs <- testset[,c(15,18:(ncol(testset)-1))]
+  trainsetpvs <- trainset[,c(15,18:(ncol(trainset)-1))]
+  testsetrv <- testset$FLOW
+  trainsetrv <- trainset$FLOW
+  
+  modfilename <- paste0("ch2 data transformations/outputdata/vi_saved_mods/rf_rds/rf_", h, ".rds")
+  rfmodel[[k]] <- readRDS(modfilename)
+  
+  rfvip[[k]] <- vip(
+    object = rfmodel[[k]],                                               # fitted model
+    method = "model",                                                    # model-based VI scores
+    num_features = trainingdim[2],                                       # default only plots top 10 features
+    pred_wrapper = pred_wrapper(rfmodel[[k]], testsetpvs),               # user-defined prediction function
+    train = as.data.frame(trainsetpvs),                                  # training data
+    target = trainsetrv,                                                 # response values used for training
+    metric = "r2",                                                       # evaluation metric
+    task = "regression"
+    # progress = "text"                                                  # request a text-based progress bar
+    )
+}
+
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   png(paste0("ch2 data transformations/outputdata/vip/rf/vip_testset_", h, ".png"), width=6.5, height=8, units="in", pointsize=8, res=1200)
+#     print(rfvip[[k]], bar=FALSE, shape=19, horizontal=TRUE) + theme_bw()
+#   dev.off()
+# }
+```
+
+```{r vip_averages}
+vimeans <- function(model, ...){
+  vils <- list()
+  for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+    h <- unique(df_lm_agg$CDEC_ID)[k]
+    vils[[k]] <- data.frame(vi(model[[k]], var_fun="con", scale=TRUE, ...))
+    vils[[k]][,"TESTSET"] <- h
+  }
+  vidf <- do.call("rbind", vils)
+  vidf_mean <- aggregate(Importance~Variable, data=vidf, FUN=mean)
+  vidf_mean <- vidf_mean[order(vidf_mean$Importance, decreasing=TRUE), ]
+}
+
+lmvi_mean <- vimeans(linearmodel, method="model")
+lmvi_mean$MODELTYPE <- "LM"
+
+glmvi_mean <- vimeans(glinearmodel, method="model")
+glmvi_mean$MODELTYPE <- "GLM"
+
+rfvi_mean <- vimeans(rfmodel, method="model")
+rfvi_mean$MODELTYPE <- "RF"
+
+# have to treat this specially
+vils <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  vils[[k]] <- data.frame(nnvip[[k]]$data)
+  vils[[k]][,"TESTSET"] <- h
+}
+vidf <- do.call("rbind", vils)
+nnvi_mean <- aggregate(Importance~Variable, data=vidf, FUN=mean)
+nnvi_mean <- nnvi_mean[order(nnvi_mean$Importance, decreasing=TRUE), ]
+nnvi_mean$MODELTYPE <- "NN"
+nnvi_mean$Importance <- nnvi_mean$Importance*100 # all the others are scaled to 100
+
+vi_means <- rbind(lmvi_mean, glmvi_mean, rfvi_mean, nnvi_mean)
+vi_means$Variable <- factor(vi_means$Variable, levels = nnvi_mean$Variable[order(nnvi_mean$Importance, decreasing=FALSE)])
+vi_means$MODELTYPE <- factor(vi_means$MODELTYPE, levels=c("LM", "GLM", "RF", "NN"))
+
+png("ch2 data transformations/outputdata/rplot213_vip_means.png", width=6.5, height=8, units="in", pointsize=8, res=1200)
+  ggplot(data=vi_means, aes(x=Importance, y=Variable, group=MODELTYPE)) +
+    geom_point(aes(shape=MODELTYPE, color=MODELTYPE), size=4)+
+    scale_color_manual(values=cbpblack[c(2, 3, 6, 1)])+
+    scale_shape_manual(values=c(3, 17, 0, 16))+
+    labs(x="Importance (scaled)", y="")+
+    theme_bw()+
+    theme(legend.position="bottom", legend.title = element_blank())
+dev.off()
+```
+
+# 10.0 Partial Dependence Plots
+```{r pdp}
+library(pdp)
+pdp_AREASQM <- pdp_PPT <- list()
+nnmodel <- list()
+
+pdp_wrapper <- function(object, newdata) {
+  predict(object, x = as.matrix(newdata)) %>%
+    as.vector() %>%
+    mean()  # aggregate ICE curves
+}
+pdp_AREASQM_PPT <- pdp_MONTH <- list()
+
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+  testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+  trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+  testsetrv <- as.matrix(testset$FLOW)
+  trainsetrv <- as.matrix(trainset$FLOW)
+
+  modfilename <- paste0("ch2 data transformations/outputdata/vi_saved_mods/nn_hdf5/nn_", h, ".h5")
+  nnmodel[[k]] <- load_model_hdf5(modfilename, compile=FALSE)
+
+  # pdp_AREASQM[[k]] <- partial(nnmodel[[k]], pred.var = "AREASQM", pred.fun = pred_wrapper, train = as.data.frame(trainsetpvs))
+  # pdp_PPT[[k]] <- partial(nnmodel[[k]], pred.var = "PPT", pred.fun = pred_wrapper, train = as.data.frame(trainsetpvs))
+  # pdp_AREASQM_PPT[[k]] <- partial(nnmodel[[k]], pred.var = c("AREASQM", "PPT"), chull = TRUE, pred.fun = pdp_wrapper, train = as.data.frame(trainsetpvs))
+  pdp_MONTH[[k]] <- partial(nnmodel[[k]], pred.var = "MONTH_ORDINAL", chull = TRUE, pred.fun = pdp_wrapper, train = as.data.frame(trainsetpvs))
+}
+# 
+## took too long to run, especially the joint partial dependence so save and read back in
+# saveRDS(pdp_AREASQM, "ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM.RDS")
+# saveRDS(pdp_PPT, "ch2 data transformations/outputdata/pd_saved/nn_pdp_PPT.RDS")
+# saveRDS(pdp_AREASQM_PPT, "ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM_PPT.RDS")
+saveRDS(pdp_MONTH, "ch2 data transformations/outputdata/pd_saved/nn_pdp_MONTH.RDS")
+
+pdp_AREASQM <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM.RDS")
+pdp_PPT <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_PPT.RDS")
+pdp_AREASQM_PPT <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM_PPT.RDS")
+pdp_MONTH <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_MONTH.RDS")
+
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){ # randomly sampled because it was taking too long to plot
+  h <- unique(df_lm_agg$CDEC_ID)[k]
+  # p1 <- pdp_AREASQM[[k]][sample(nrow(pdp_AREASQM[[k]]), 50000),]  %>% autoplot(alpha = 0.1) + 
+  #   labs(x="Drainage Area (km^2)", y="Predicted Unimpaired Flow (AF)") +
+  #   theme_bw()
+  # p2 <- pdp_PPT[[k]][sample(nrow(pdp_PPT[[k]]), 50000),] %>% autoplot(alpha = 0.1) + 
+  #   labs(x="Precipitation (mm)", y="Predicted Unimpaired Flow (AF)") +
+  #   theme_bw()
+  # p3 <-  pdp_AREASQM_PPT[[k]] %>% autoplot() + 
+  #   labs(x="Drainage Area (km^2)", y="Precipitation (mm)") +
+  #   guides(fill=guide_legend(title="Predicted \nUnimpaired \nFlow (AF)"))
+  #   theme_bw()
+  p4 <-  pdp_MONTH[[k]] %>% autoplot(alpha = 0.1) + 
+    labs(x="Ordinal Month (km^2)", y="Predicted Unimpaired Flow (AF)") +
+    theme_bw()
+  
+  # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp1_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+  #   grid.arrange(p1, p2, ncol = 2)+
+  #     theme_bw()
+  # dev.off()
+  # 
+  # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp2_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+  #   print(p3)
+  # dev.off()
+  
+  png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp3_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+    print(p4)
+  dev.off()
+}
+
+# to customize 
+print(pdp_AREASQM[[1]][sample(nrow(pdp_AREASQM[[1]]), 50000),] 
+      %>% autoplot(alpha = 0.1))
+      
+      +
+      labs(x="Drainage Area (km^2)", y="Precipitation (mm)")+
+      theme_bw()+
+      guides(fill=guide_legend(title="Predicted \nUnimpaired \nFlow (AF)"))
+      
+      )
+
+```
+
+Find out how different the PDP and the VIP plots are between nn that preforms well and the other models. Leo Brieman, in two cultures, argues that if a model isn't a good predictor, then it may produce erroneous conclusions about the underlying mechanism that produced the data. Let's see how different that really is. maybe compare across the 10 basins that overlap with the BCM so it doesn't become too hard to compare. 
+
+
+# 11.0 Variable Interactions
+```{r interactions}
+vint(object = nnmodel[[1]], parallel = TRUE)
+
+
+```

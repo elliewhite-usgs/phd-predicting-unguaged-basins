@@ -636,27 +636,19 @@ wlse_wrapper_minibatch <- function(alphad, betad, alphaf, betaf) {
 
 #y_true=rnorm(nrow(trainsetpvs2), 0, 1)*20000
 #y_pred=y_true*2-rnorm(nrow(trainsetpvs2), 0, 0.01)*20000
-# K$eval() to see the values
-#K$flatten(y_true)-K$flatten(y_pred))
 
-linexe_wrapper_stochastic <- function(phid, phif) {
-  phi_vect <- ifelse(trainsetpvs_scaled2[, "FLOOD"]==0, phid, phif)
+linexe_wrapper_stochastic <- function(flood_vect, phid, phif) {
+  phi_vect <- ifelse(flood_vect==0, phid, phif)
   K <- backend()
   phi_vect_cte <- K$constant(phi_vect, dtype='float32')
   
   linexe <- function(y_true, y_pred){ 
     K <- backend() 
-    # if(any(is.na(K$eval(K$flatten(y_pred))))){
-    #   print("NAs in y_pred!")
-    # }
     exp_loss <- K$exp(K$transpose(phi_vect_cte)*K$flatten(y_true-y_pred))
     lin_loss <- K$transpose(phi_vect_cte)*K$flatten(y_true-y_pred)+1
-    
-    # have to define the size here, because batch_size gets defined after the compile step. K$ uses zero based indexing
-    # vect_size <- K$cast_to_floatx(K$int_shape(K$flatten(y_true-y_pred)))[0] 
-    # mod_loss <- K$sum(exp_loss-lin_loss-1)/vect_size
-    # seems like this works when batch_size=nrow(trainsetpvs)
-    mod_loss <- K$mean(10*(exp_loss-lin_loss)) # added a beta in the beginning
+  
+    # unlike minibatch K$mean works, because we know batch_size=nrow(trainsetpvs)
+    mod_loss <- K$mean(10^6*(exp_loss-lin_loss)) # added a beta in the beginning
     
     # return the value that depends on all inputs, y_true, y_pred, phid, phif
     return(mod_loss) 
@@ -668,6 +660,7 @@ linexe_wrapper_stochastic <- function(phid, phif) {
 # install and set up our environment for deep learning
 # devtools::install_github("rstudio/keras")
 library(keras)
+# library(reticulate) # seems like this resolved error 2 in installing a keras environment on the watershed computer
 install_keras(method = "conda")
 
 library (caret) # for normalizing data 
@@ -793,7 +786,7 @@ nncvloss <- function(data, losstype){
 
     if(losstype=="linexe"){
       nnmodel %>% # try "rmsprop", "adam", "sgd", "nadam" 
-        compile(optimizer="adam", loss=linexe_wrapper_stochastic(phid=-10^-6, phif=10^-6), metrics=c("mae"))
+        compile(optimizer="adam", loss=linexe_wrapper_stochastic(flood_vect=trainsetpvs_scaled2[, "FLOOD"], phid=-10^-6, phif=10^-6), metrics=c("mae"))
       nnmodel %>% 
         fit(trainsetpvs_scaled, trainsetrv, epochs=10000, verbose=1, batch_size=nrow(trainsetpvs_scaled), shuffle=FALSE)
       predictions <- nnmodel %>% predict(testsetpvs_scaled)
@@ -814,13 +807,15 @@ nncvloss <- function(data, losstype){
 }
 
 # decide whether you're doing inc or agg? agg won't have post processing to do 
-nn_inc_logo_mse_results <- nncvloss(df_lm_agg, "mse")
-nn_inc_logo_mae_results <- nncvloss(df_lm_agg, "mae")
-nn_inc_logo_mape_results <- nncvloss(df_lm_agg, "mape")
-nn_inc_logo_mlae_results <- nncvloss(df_lm_agg, "mlae")
-nn_inc_logo_mslae_results <- nncvloss(df_lm_agg, "mslae")
-nn_inc_logo_wlse_results <- nncvloss(df_lm_agg, "wlse")
-nn_inc_logo_linexe_results <- nncvloss(df_lm_agg, "linexe")
+nn_agg_logo_mse_results <- nncvloss(df_lm_agg, "mse")
+nn_agg_logo_mae_results <- nncvloss(df_lm_agg, "mae")
+nn_agg_logo_mape_results <- nncvloss(df_lm_agg, "mape")
+nn_agg_logo_mlae_results <- nncvloss(df_lm_agg, "mlae")
+nn_agg_logo_mslae_results <- nncvloss(df_lm_agg, "mslae")
+nn_agg_logo_wlse_results <- nncvloss(df_lm_agg, "wlse")
+
+nn_agg_logo_linexe_results <- nncvloss(df_lm_agg, "linexe")
+saveRDS(nn_agg_logo_linexe_results, file="ch3 loss functions/outputdata/rds/nn_agg_logo_linexe_results.RDS")
 
 # quick check on the results
 # mean(unlist(nn_inc_logo_mse_results[["gof"]]["bR2", ]))
@@ -830,8 +825,8 @@ nn_inc_logo_linexe_results <- nncvloss(df_lm_agg, "linexe")
 # saveRDS(nn_inc_logo_mape_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_mape_results.RDS")
 # saveRDS(nn_inc_logo_mlae_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_mlae_results.RDS")
 # saveRDS(nn_inc_logo_mslae_results, file="ch3 loss functions/outputdata/rds/lm_inc_logo_mslae_results.RDS")
-saveRDS(nn_inc_logo_wlse_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_wlse_results.RDS")
-saveRDS(nn_inc_logo_linexe_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_linexe_results.RDS")
+# saveRDS(nn_inc_logo_wlse_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_wlse_results.RDS")
+# saveRDS(nn_inc_logo_linexe_results, file="ch3 loss functions/outputdata/rds/nn_inc_logo_linexe_results.RDS")
 
 nn_inc_logo_mse_results <- readRDS("ch3 loss functions/outputdata/rds/nn_inc_logo_mse_results.RDS")
 nn_inc_logo_mae_results <- readRDS("ch3 loss functions/outputdata/rds/nn_inc_logo_mae_results.RDS")

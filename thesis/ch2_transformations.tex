@@ -349,6 +349,7 @@ Figure \ref{fig:resovertime} shows that the models all decrease in accuracy over
 \end{figure}
 
 In the NSE, the NN incremental model provides the best model performance, therefore, we will now abandon the comparative analysis and examine the spatial distribution of this model.
+
 %-----------------------------------------------
 \subsection{Spatial Distribution of Errors}
 Figures \ref{fig:incbr2plus} and \ref{fig:aggincbr2comp} show the bR\textsuperscript{2} values for the 67 basins in this study. As expected, the model's ability to predict unimpaired flow varies across California. The model performs better at basins  lower in the network (i.e., have a higher hierarchy). This could be due to: (1) the basins with higher hierarchies generally have larger flows and the model is trained with a squared error loss that penalizes large errors more harshly; or (2) there was substantial value in having flow information upstream (i.e, the decline is error is due to having incremental basins). 
@@ -402,6 +403,27 @@ Figures \ref{fig:br2dotchartcomp} and \ref{fig:br2boxplotcomp} show that when th
 	\caption{The incremental and aggregate basins perform very similarly when there is no information upstream (i.e., hierarchy=1). However, when we introduce information upstream (i.e., hierarchy=2,3,4, and 5) the incremental basins can perform much better than the aggregate.}
 	\label{fig:br2boxplotcomp}
 \end{figure}
+
+A model with higher predictive accuracy can produce more reliable information about the mechanism producing the underlying data, and weak predictive accuracy can lead to questionable conclusions \cite{breiman2001statistical}. Therefore, given a ``good'' model, model-agnostic interpretation methods, or methods that can be used for any type of model, can give more reliable insights into what would otherwise be a black-box model. With the model measures of fit in mind, the following sections will discuss two popular interpretability methods: variable importance and partial dependence. 
+
+%-----------------------------------------------
+\subsection{Variable Importance}
+%What is it? How is it calculated? model approach, permute approach
+
+\begin{figure}
+  	\centering
+ 	\includegraphics[width=\textwidth, trim={0 0 0 0}, clip=true]{plots/rplot213_vip_means.png}
+	\caption{Scaled Average Variable Importance.}
+	\label{fig:vipmeans}
+\end{figure}
+
+% what does this graph say?
+
+\subsection{Partial Dependence}
+% how to show an average 
+for the NN Aggregate model chosen because it has the highest measure of fit with the least amount of data pre-processing for easier to interpretation.  
+ICE plots, and PDP plots
+In ICE plots one line represents the predictions for one instance if we vary the feature of interest.
 
 %------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 \section{Conclusion}
