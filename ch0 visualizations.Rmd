@@ -93,6 +93,12 @@ caboundary <- spTransform(caboundary, ta)
 
 basins_agg <- basins[1:(which(basins$CDEC_ID=="AMA_INC")[1]-1), ]
 basins_inc <- basins[which(basins$CDEC_ID=="AMA_INC")[1]:nrow(basins), ]
+
+# print a summary table for appendix A
+library(xtable)
+tbl_appa <- basins_agg@data[basins_agg@data$CDEC_ID!="KLO", c(1:2, 10:13)]
+rownames(tbl_appa) <- 1:dim(tbl_appa)[1]
+xtable(tbl_appa)
 ```
 
 # 2.0 Plots
@@ -100,7 +106,6 @@ basins_inc <- basins[which(basins$CDEC_ID=="AMA_INC")[1]:nrow(basins), ]
 ## 2.1 Plot Elements
 ```{r labels}
 library(Hmisc) 
-
 # for model data frame
 # remember we deleted "Dominant Geology" column
 var_labels <- c("Date","Basin ID", "Basin Name", "River Basin", "County", "Operator", "Station Above #1", "Station Above #2", "Station Above #3", "Station Above #4", "Hierarchy", "Lon", "Lat", "Month", "Ordinal Month", "Season", "Year", "Water Year", "Temperature", "Tmp Lag 1m", "Tmp Lag 2m", "Tmp Lag 3m", "Precipitation", "Ppt Lag 1m", "Ppt Lag 2m", "Ppt Lag 3m", "Snow", "Drainage Area", "Shape", "Compactness", "Mean Elevation", "Relief Ratio", "Sat. Hyd. Conductivity", "% Silt", "% Sand", "% Clay", "Avail. Water Cont.", "Lambda Pore Size", "N Pore Size", "Depth to Restricted Layer", "Percent Vegetated", "Unimpaired Flow" ) 
@@ -124,16 +129,14 @@ round(apply(basins_inc@data[,13:27],2,summary),2)
 
 ```{r visuals}
 # colourblind palettes
-# The palette with grey:
-cbpgrey <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#0072B2", "#D55E00")
-
-# The palette with black:
-cbpblack <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#F0E442", "#0072B2", "#D55E00")
+# ordered:     black      pink        orange     yellow     green       blue      darkorange  lightblue
+cbpgrey <-  c("#999999", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+cbpblack <- c("#000000", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
 
 cols <- character(nrow(moddf_agg))
 cols[] <- "black"
-cols[moddf_agg$FLOW >= mean(moddf_agg$FLOW)] <- cbpblack[3]
-cols[moddf_agg$FLOW < mean(moddf_agg$FLOW)] <- cbpblack[2]
+cols[moddf_agg$FLOW >= mean(moddf_agg$FLOW)] <- cbpblack[8]
+cols[moddf_agg$FLOW < mean(moddf_agg$FLOW)] <- cbpblack[3]
 
 plot(moddf_agg$FLOW, main="Observed Response Data", ylab="Total Unimpaired Flow (AF/m)", col=cols)
 
@@ -194,10 +197,10 @@ dev.off()
 
 ```{r box_plots}
 library(ggplot2)
-
 # order months in moddf_agg for boxplots
 moddf_agg_c <- moddf_agg
 moddf_agg_c$MONTH <- factor(moddf_agg$MONTH, levels=c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"))
+moddf_agg_c$HIERARCHY <- factor(moddf_agg_c$HIERARCHY, levels=c("1", "2", "3", "4", "5"))
 moddf_agg_c$COLOR <- cbpblack[1:5][moddf_agg_c$HIERARCHY]
 
 # Box plot with jittered points
@@ -205,30 +208,30 @@ png('ch0 data prep/outputdata/rplot04_boxplot.png', width=6.5, height=3, units="
 ggplot(moddf_agg_c, aes(x=MONTH, y=FLOW, col=HIERARCHY)) + 
         geom_jitter(shape=16, position=position_jitter(0.2), alpha=0.5) +
         geom_boxplot(outlier.shape=NA) +
-        labs(x="", y="Total Unimpaired Flow (AF/m)", col="Basin Hierarchy") +
-        scale_color_manual(values=cbpblack[1:5]) +
+        labs(x="", y="Total Unimpaired Flow (AF/m)", col="Hierarchy") +
+        scale_color_manual(values=cbpblack[2:6]) +
         theme_bw(base_size = 8) +
-        theme(legend.position=c(0.9,0.75), legend.background=element_rect(fill="grey96"))
+        theme(legend.position="right")
 dev.off()
 
 png('ch0 data prep/outputdata/rplot05_flowvslat.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
 ggplot(moddf_agg_c, aes(x=LATITUDE, y=FLOW, color=HIERARCHY)) + 
         geom_jitter(shape=16, position=position_jitter(0.1), alpha=0.5) +
-        labs(x="Latitude (Deg)", y="Total Unimpaired Flow (AF/m)", col="Basin Hierarchy") +
-        scale_color_manual(values=cbpblack[1:5]) +
+        labs(x="Latitude (Deg)", y="Total Unimpaired Flow (AF/m)", col="Hierarchy") +
+        scale_color_manual(values=cbpblack[2:6]) +
         theme_bw(base_size = 8) +
-        theme(legend.position=c(0.1,0.75), legend.background=element_rect(fill="grey96"))
+        theme(legend.position="right")
 dev.off()
 ```
 
 ## 2.3 2D Plots
 ```{r correlation_plots}
 png('ch0 data prep/outputdata/rplot05_tmpvsppt.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
-par(mar=c(4,4,1,1)+0.1)
-plot(moddf_agg$PPT, moddf_agg$TMP, col=alpha(cols, 0.2), xlab="", ylab="", pch=16)
-title(xlab="Precipitation (mm)", line=2)
-title(ylab=substitute(paste('Temperature', B * degree, "C)"),  list(B = " (")), line=2)
-legend("topright", inset=0.05, cex=0.8, c("low flow", "high flow"), horiz=FALSE, pch=c(16,16), col=c(cbpblack[2], cbpblack[3]), bg="grey96", box.lty=0)
+        par(mar=c(4,4,1,1)+0.1)
+        plot(moddf_agg$PPT, moddf_agg$TMP, col=alpha(cols, 0.2), xlab="", ylab="", pch=16)
+        title(xlab="Precipitation (mm)", line=2)
+        title(ylab=substitute(paste('Temperature', B * degree, "C)"),  list(B = " (")), line=2)
+        legend("topright", inset=0.05, cex=0.8, c("low flow", "high flow"), horiz=FALSE, pch=c(16,16), col=c(cbpblack[3], cbpblack[8]), bg="grey96", box.lty=0)
 dev.off()
 
 # or do this
@@ -254,13 +257,14 @@ myplot <- ggplot(moddf_agg, aes(x=PPT, y=TMP, size=FLOW, fill=CDEC_ID)) +
         scale_color_gradientn(colours = rainbow(length(levels(moddf_agg$CDEC_ID)))) +
         labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basins") +
         guides(fill = FALSE) +
-        annotation_custom(grob = textGrob("Each of the 68 basins is in a different color."), xmin = 1.137*max(moddf_agg$PPT), xmax = 1.137*max(moddf_agg$PPT), ymin = -4.5, ymax = -4.55)
+        annotation_custom(grob = textGrob("Each of the 68 basins is a different color."), xmin = 1.137*min(moddf_agg$PPT), xmax = 1.137*max(moddf_agg$PPT), ymin = 25, ymax = 25)
 # Turn off clipping to the plot panel
 myplotg <- ggplotGrob(myplot)
 myplotg$layout$clip[myplotg$layout$name == "panel"] = "off"
 grid.draw(myplotg)
 dev.off()
 
+moddf_agg$HIERARCHY <- factor(moddf_agg$HIERARCHY, levels=c("1", "2", "3", "4", "5"))
 png('ch0 data prep/outputdata/rplot05_tmpvsppt4.png', width=6.5, height=3.5, units="in", pointsize=8, res=1200)
 par(mar=c(4,4,1,1)+0.1)
 ggplot(moddf_agg, aes(x=PPT, y=TMP, size=FLOW, fill=HIERARCHY)) +
@@ -270,31 +274,31 @@ ggplot(moddf_agg, aes(x=PPT, y=TMP, size=FLOW, fill=HIERARCHY)) +
         scale_size_area(max_size = 10) +
         theme_bw() +
         labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basin Hierarchy") +
-        scale_fill_manual(values = cbpblack[1:5])
+        scale_fill_manual(values = cbpblack[2:6])
 dev.off()
 
 png('ch0 data prep/outputdata/rplot05_pptvsflow.png', width=8, height=3.5, units="in", pointsize=10, res=1200)
 par(mar=c(4,4,1,1)+0.1)
-ggplot(moddf_agg, aes(x=PPT, y=FLOW, size=AREASQKM, fill=HIERARCHY)) +
+ggplot(moddf_agg, aes(x=PPT, y=FLOW, size=AREASQM, fill=HIERARCHY)) +
         geom_point(alpha=0.5, shape=21) +
         labs(x="Precipitation (mm)", 
              y="Total Unimpaired Flow (AF/m)") +
         scale_size_area(max_size = 10) +
         theme_bw() +
         labs(size= "Drainage Area (Sqm)", fill = "Basin Hierarchy") +
-        scale_fill_manual(values = cbpblack[1:5])
+        scale_fill_manual(values = cbpblack[2:6])
 dev.off()
 
 png('ch0 data prep/outputdata/rplot05_pptvsarea.png', width=8, height=3.5, units="in", pointsize=10, res=1200)
 par(mar=c(4,4,1,1)+0.1)
-ggplot(moddf_agg, aes(x=PPT, y=AREASQKM, size=FLOW, fill=HIERARCHY)) +
+ggplot(moddf_agg, aes(x=PPT, y=AREASQM, size=FLOW, fill=HIERARCHY)) +
         geom_point(alpha=0.5, shape=21) +
         labs(x="Precipitation (mm)", 
-             y="Drainage Area (Sqm)") +
+             y="Drainage Area (km^2)") +
         scale_size_area(max_size = 10) +
         theme_bw() +
         labs(size= "Total Unimpaired Flow (AF/m)", fill = "Basin Hierarchy") +
-        scale_fill_manual(values = cbpblack[1:5])
+        scale_fill_manual(values = cbpblack[2:6])
 dev.off()
 ```
 
@@ -302,8 +306,8 @@ dev.off()
 ```{r 3dplots}
 library(plotly)
 png('ch0 data prep/outputdata/rplot05_tmpvsppt5.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
-par(mar=c(4,4,1,1)+0.1)
-plot_ly(moddf_agg, x=~PPT, y=~AREASQKM, z=~FLOW, type="scatter3d", mode="markers", color=~HIERARCHY)
+        par(mar=c(4,4,1,1)+0.1)
+        plot_ly(moddf_agg, x=~PPT, y=~AREASQM, z=~FLOW, type="scatter3d", mode="markers", color=~HIERARCHY)
 dev.off()
 
 moddf_agg_c <- moddf_agg
@@ -323,7 +327,7 @@ plot_ly(moddf_agg_c, x = ~PPT, y = ~AREASQKM, z = ~FLOW, type="scatter3d", mode=
                )
 
 library("scatterplot3d")
-scatterplot3d(moddf_agg_c[,c("PPT", "AREASQKM", "FLOW")], pch = 16, color=moddf_agg_c$COLOR, grid=TRUE, type="h")
+scatterplot3d(moddf_agg_c[,c("PPT", "AREASQM", "FLOW")], pch = 16, color=moddf_agg_c$COLOR, grid=TRUE, type="h")
 legend("top", legend = levels(moddf_agg_c$HIERARCHY), pch = 16, xpd = TRUE, horiz = TRUE, col=cbpgrey[1:5], title="Basin Hierarchy", inset = c(-0.5))
 ```
 
@@ -409,42 +413,42 @@ dev.off()
 # draw a correlolgram
 library(corrplot)
 png('ch0 data prep/outputdata/rplot07_corrplot.png', width=6.5, height=5.69, units="in", pointsize=8, res=1200)
-par(mar=c(4,1,0,0)+0.1)
-cols <- colorRampPalette(c(cbpblack[2],'grey80',cbpblack[3]))
-moddf_agg_c <- moddf_agg
-colnames(moddf_agg_c) <- Hmisc::label(moddf_agg)
-corrplot(cor(moddf_agg_c[,-c(1:16)]), order="hclust", tl.col="black", method="color", addCoef.col="white",  addCoefasPercent=TRUE, col=cols(100), tl.pos="lt", diag=FALSE, cl.pos="r", tl.cex=1, number.cex=0.7, tl.srt = 90)
+        par(mar=c(4,1,0,0)+0.1)
+        cols <- colorRampPalette(c(cbpblack[3],'grey80',cbpblack[8]))
+        moddf_agg_c <- moddf_agg
+        colnames(moddf_agg_c) <- Hmisc::label(moddf_agg)
+        corrplot(cor(moddf_agg_c[,-c(1:16)]), order="hclust", tl.col="black", method="color", addCoef.col="white",  addCoefasPercent=TRUE, col=cols(100), tl.pos="lt", diag=FALSE, cl.pos="r", tl.cex=1, number.cex=0.7, tl.srt = 90)
 dev.off()
 ```
 
 ```{r cor_dotchart}
 library(Hmisc)
 png('ch0 data prep/outputdata/rplot08_corrwithflow.png', width=3.25, height=3, units="in", pointsize=8, res=1200)
-par(mar=c(4,11,1,1)+0.1)
-corrdf <- cor(moddf_agg[,-c(1:16)])
-corrdf <- corrdf[ncol(corrdf), 1:ncol(corrdf)]
-corrdf <- merge(data.frame(corrdf), data.frame(Hmisc::label(moddf_agg)), by=0)
-corrdf <- corrdf[order(corrdf$corrdf,decreasing=FALSE),]
-dotchart(corrdf[,2], xlim=c(-0.5,1.1), xlab="Correlation With \n Unimpaired Flow", pch=19, pt.cex = 0.7, panel.first=abline(v=0, col=cbpblack[3], lty=2))
-axis(side = 2, seq_along(corrdf[,2]), corrdf[,3], las=1, tick=FALSE, cex.axis=0.7) 
-text(x=corrdf[1:nrow(corrdf),2], y=1:nrow(corrdf), labels=round(corrdf[1:nrow(corrdf),2],2), pos=4, cex=0.7)
+        par(mar=c(4,11,1,1)+0.1)
+        corrdf <- cor(moddf_agg[,-c(1:16)])
+        corrdf <- corrdf[ncol(corrdf), 1:ncol(corrdf)]
+        corrdf <- merge(data.frame(corrdf), data.frame(Hmisc::label(moddf_agg)), by=0)
+        corrdf <- corrdf[order(corrdf$corrdf,decreasing=FALSE),]
+        dotchart(corrdf[,2], xlim=c(-0.5,1.1), xlab="Correlation With \n Unimpaired Flow", pch=19, pt.cex = 0.7, panel.first=abline(v=0, col=cbpblack[8], lty=2))
+        axis(side = 2, seq_along(corrdf[,2]), corrdf[,3], las=1, tick=FALSE, cex.axis=0.7) 
+        text(x=corrdf[1:nrow(corrdf),2], y=1:nrow(corrdf), labels=round(corrdf[1:nrow(corrdf),2],2), pos=4, cex=0.7)
 dev.off()
 
 # In R, there are several packages for getting the partial correlation coefficients along with the t- test for checking their significance level. Use the package to compute the partial correlation coefficients along with the t-statistic and corresponding p-values.corpcor had a better way of calculating the partial correlations without so many errors in the covariance matrix not being positive definite and being singular.
 
 library(corpcor) # cor2pcor computes the pairwise partial correlation coefficients from either a correlation or a covariance matrix
 png('ch0 data prep/outputdata/rplot08_partialcorrwithflow.png', width=3.5, height=3, units="in", pointsize=8, res=1200)
-par(mar=c(4,11,1,1)+0.1)
-corrdf <- cor(moddf_agg_c[,-c(1:16)])
-pcorrdf <- cor2pcor(corrdf)
-pcorrdf <- pcorrdf[ncol(pcorrdf), 1:ncol(pcorrdf)]
-pcorrdf <- cbind(data.frame(pcorrdf), data.frame(Hmisc::label(moddf_agg_c)[-c(1:16)]))
-colnames(pcorrdf)[2] <- "LABEL"
-pcorrdf <- pcorrdf[order(pcorrdf$pcorrdf,decreasing=FALSE),]
-dotchart(pcorrdf[,1], xlim=c(-0.5,1.1), xlab="Partial Correlation \n With Unimpaired Flow", pch=19, pt.cex=0.7)
-axis(side = 2, seq_along(pcorrdf[,1]), pcorrdf[,2], las=1, tick=FALSE, cex.axis=0.7) 
-text(x=pcorrdf[1:nrow(pcorrdf),1], y=1:nrow(pcorrdf), labels=round(pcorrdf[1:nrow(pcorrdf),1],2), pos=4, cex=0.7)
-abline(v=0, col=cbpblack[3], lty=2)
+        par(mar=c(4,11,1,1)+0.1)
+        corrdf <- cor(moddf_agg_c[,-c(1:16)])
+        pcorrdf <- cor2pcor(corrdf)
+        pcorrdf <- pcorrdf[ncol(pcorrdf), 1:ncol(pcorrdf)]
+        pcorrdf <- cbind(data.frame(pcorrdf), data.frame(Hmisc::label(moddf_agg_c)[-c(1:16)]))
+        colnames(pcorrdf)[2] <- "LABEL"
+        pcorrdf <- pcorrdf[order(pcorrdf$pcorrdf,decreasing=FALSE),]
+        dotchart(pcorrdf[,1], xlim=c(-0.5,1.1), xlab="Partial Correlation \n With Unimpaired Flow", pch=19, pt.cex=0.7)
+        axis(side = 2, seq_along(pcorrdf[,1]), pcorrdf[,2], las=1, tick=FALSE, cex.axis=0.7) 
+        text(x=pcorrdf[1:nrow(pcorrdf),1], y=1:nrow(pcorrdf), labels=round(pcorrdf[1:nrow(pcorrdf),1],2), pos=4, cex=0.7)
+        abline(v=0, col=cbpblack[8], lty=2)
 dev.off()
 ```
 

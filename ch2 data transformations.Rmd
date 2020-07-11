@@ -10,23 +10,18 @@ Record of how a model's predictive capapility is different given different data 
 # Contents   
 1.0 Data Gathering  
 2.0 Data Transformations  
-  2.1 Aggregate vs. Incremental Basins  
-  2.2 Cumulative vs. Non-Cumulative  
-  2.3 Log Transforming, Linear Modeling, Back-Transforming (NA)  
-  2.4 Whitening (NA)  
-3.0 Modelling and Resampling  
-  3.1 Resubstitution  
-  3.2 Random K-fold  
-  3.3 Leave One Group Out  
-  3.4 Random K-fold Leave Multiple Groups Out  
-  3.5 Hierarchical Leave Multiple Groups Out  
-4.0 LOGO Post Processing  
-  4.1 Aggregate Basins
-  4.2 Incremental Basins  
-  4.3 Cumulative Basins 
-5.0 Test and Analyze
-6.0 Visual Fit  
-7.0 Goodness of Fit   
+3.0 Function
+4.0 Modelling and Resampling  
+5.0 LOGO Post Processing  
+  5.1 Aggregate Basins
+  5.2 Incremental Basins  
+  5.3 Cumulative Basins 
+6.0 Test and Analyze
+7.0 Visual Fit  
+8.0 Goodness of Fit  
+9.0 Variable Importance Plots  
+10.0 Partial Dependence Plots  
+11.0 Variable Interactions
 
 ```{r, include=FALSE}
 library(knitr)
@@ -35,7 +30,7 @@ opts_chunk$set(fig.width = 7.5, fig.height = 7.5, collapse = TRUE, tidy = FALSE)
 ```
 
 # Citations
-```{r citations}
+```{r citations} 
 # cite R 
 toBibtex(citation())
 
@@ -43,7 +38,7 @@ toBibtex(citation())
 RStudio.Version()
 
 # cite packages
-citethese <- c("raster", "sp", "rgdal", "rgeos", "dismo", "geojsonio", "hydroGOF", "RColorBrewer", "fBasics", "lmtest", "prism", "reshape2", "statmod")
+citethese <- c("raster", "sp", "rgdal", "rgeos", "dismo", "geojsonio", "hydroGOF", "RColorBrewer", "fBasics", "lmtest", "reshape2", "statmod")
 for(c in seq_along(citethese)){
   print(toBibtex(citation(citethese[c])))
 }
@@ -59,7 +54,7 @@ set.seed(3232019)
 ```
 
 # 1.0 Data Gathering
-```{r data_gathering} 
+```{r data_gathering}
 df <- readRDS('inputdata/moddf.rds')
 dfc <- readRDS('inputdata/moddfc.rds')
 
@@ -120,7 +115,7 @@ cdec_fnf_wide <- cdec_fnf_wide[order(cdec_fnf_wide$DATE),]
 cdec_fnf_wide <- cdec_fnf_wide[cdec_fnf_wide$DATE>="1982-01-01", ]
 ```
 
-```{r visuals}
+```{r visuals} 
 # colourblind palettes
 # ordered:     black      pink        orange     yellow     green       blue      darkorange  lightblue
 cbpgrey <-  c("#999999", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
@@ -128,7 +123,7 @@ cbpblack <- c("#000000", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2",
 ```
 
 # 2.0 Data Tranformations
-```{r data_transformation_lm}
+```{r data_transformation_lm} 
 # for LM
 # split into two one original aggregate basins and one the incremental basins
 df_lm_agg <- moddf[1:(which(moddf$CDEC_ID=="AMA_INC")[1]-1),]
@@ -143,7 +138,7 @@ df_lm_cagg <- na.omit(df_lm_cagg)
 df_lm_cinc <- na.omit(df_lm_cinc)
 ```
 
-```{r data_transformations_glm}
+```{r data_transformations_glm} 
 # for GLM
 # make another data frame without the 0s, because a gamma distributions in glms can't handle zeros
 # We are going to add a small amount to the 0s, in essence it is the same in value but now the glm trasformations work
@@ -183,7 +178,7 @@ remove(moddfc)
 ```
 
 # 3.0 Functions
-```{r funcstoimport}
+```{r funcstoimport} 
 # library(hydroGOF) # this is giving wrong functions, do not load it in make sure the search path is clear
 goffuncs <- list.files("libraries/HydroGOFm/R")
 for(i in 1:length(goffuncs)){
@@ -195,7 +190,7 @@ search()
 ```
 
 # 4.0 Modelling and Resampling
-```{r lm_modelling_and_cv}
+```{r lm_modelling_and_cv} 
 # group can be resub, 2L, 5L, 10L, logo, lmgo, lho. Notice how a plain 2, 5, and 10 will not work, you have to declare it an integer
 # datatype can be "agg" or "inc"
 
@@ -322,7 +317,7 @@ lm_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_cagg
 lm_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/lm_cinc_logo_results.RDS")
 ```
 
-```{r glm_modelling_and_cv}
+```{r glm_modelling_and_cv} 
 glmcv <- function(data, groupingstyle, datatype, ...){ 
   # for resubstitution, where testing data and training data is the same
   if(groupingstyle=="resub"){
@@ -581,7 +576,7 @@ glm_cagg_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd
 glm_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/glmtwd_cinc_logo_results.RDS")
 ```
 
-```{r rf_modelling_and_cv}
+```{r rf_modelling_and_cv} 
 # we are not saving the models because it takes too much memory. so rrfmodel is no longer specified as a list and took mod=rfmodel out of return list. 
 
 library(randomForest)
@@ -707,124 +702,124 @@ rf_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/rf_cinc
 ```
 
 ```{r nn_modeling_and_cv}
-# install and set up our environment for deep learning
-# devtools::install_github("rstudio/keras")
+# # install and set up our environment for deep learning
+# # devtools::install_github("rstudio/keras")
 library(keras)
-install_keras(method = "conda")
-
-nncv <- function(data, groupingstyle, datatype){
-  # the model network includes two layers of fully-connected relu activated neurons, and an output layer with no transformation. units are the number of hidden nodes
-  trainingdim <- dim(data[,c(15,18:(ncol(data)-1))])
-  nnmodel <- keras_model_sequential() %>%
-  layer_dense(units=64, activation="relu", input_shape=trainingdim[[2]]) %>%
-  layer_dense(units=64, activation="relu") %>%
-  layer_dense(units=1) # number of outputs, here we just want one prediction
-    
-  nnmodel %>% # to compile the model, loss functions are defined here
-    compile(optimizer="rmsprop", loss=keras::loss_mean_squared_error, metrics=c("mae"))
-    
-  # for resubstitution, where testing data and training data is the same
-  if(groupingstyle=="resub"){
-    trainsetpvs <- as.matrix(data[,c(15,18:(ncol(data)-1))])
-    trainsetrv <- as.matrix(data$FLOW)
-    nnmodel %>%  # this is to fit the model coefficients
-      fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
-    predictions <- nnmodel %>% predict(trainsetpvs)
-    predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-    results <- cbind(obs=trainsetrv[ , 1], pred=predictions)
-    modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
-  }
-  
-  # for k-fold cross validation
-  if(is.integer(groupingstyle)){
-    group <- kfold(data, groupingstyle)
-    results <- modgof <- list()
-    for (k in 1:groupingstyle) {
-      trainset <- data[group != k, ]
-      testset <- data[group == k, ]
-      
-      # seperate into predictor variables and response variable
-      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
-      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
-      testsetrv <- as.matrix(testset$FLOW)
-      trainsetrv <- as.matrix(trainset$FLOW)
-      
-      nnmodel %>% 
-        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
-      predictions <- nnmodel %>% predict(testsetpvs)
-      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
-      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
-    }
-    names_tbd <- rownames(modgof[[1]])
-    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
-    rownames(modgof) <- names_tbd
-  }
-  
-  # for leave one group (basin) out cross validation
-  if(groupingstyle=="logo"){
-    results <- modgof <- list()
-  
-    for (k in 1:(length(unique(data$CDEC_ID)))){
-      h <- unique(data$CDEC_ID)[k]
-      testset <- data[data$CDEC_ID==h,]
-      trainset <- data[data$CDEC_ID!=h,]
-      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
-      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
-      testsetrv <- as.matrix(testset$FLOW)
-      trainsetrv <- as.matrix(trainset$FLOW)
-      
-      nnmodel %>%  
-        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
-      predictions <- nnmodel %>% predict(testsetpvs)
-      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
-      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
-    }
-    names_tbd <- rownames(modgof[[1]])
-    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
-    rownames(modgof) <- names_tbd
-    colnames(modgof) <- unique(data$CDEC_ID)
-  }
-  
-  # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
-  if(groupingstyle=="lmgo"){
-    nfolds <- 5
-    group <- as.data.frame(unique(data$CDEC_ID))
-    colnames(group) <- "CDEC_ID"
-    group$kftrain <- kfold(nrow(group), nfolds)
-    data <- merge(data, group, by="CDEC_ID")
-    
-    results <- modgof <- list()
-    for (k in 1:nfolds) {
-      testset <- data[data$kftrain == k, ]
-      trainset <- data[data$kftrain != k, ]
-      testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
-      trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
-      testsetrv <- as.matrix(testset$FLOW)
-      trainsetrv <- as.matrix(trainset$FLOW)
-      
-      nnmodel %>% 
-        fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
-      predictions <- nnmodel %>% predict(testsetpvs)
-      predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
-      results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
-      modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
-    }
-    names_tbd <- rownames(modgof[[1]])
-    modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
-    rownames(modgof) <- names_tbd
-  }
-  
-  if(groupingstyle=="resub"){
-    list(results=results, gof=modgof)
-  } else if(groupingstyle=="logo"){
-    list(results=results, gof=modgof)
-  } else{
-    list(results=results, gof=modgof, kf=group)
-  }
-}
-
+# install_keras(method = "conda")
+# 
+# nncv <- function(data, groupingstyle, datatype){
+#   # the model network includes two layers of fully-connected relu activated neurons, and an output layer with no transformation. units are the number of hidden nodes
+#   trainingdim <- dim(data[,c(15,18:(ncol(data)-1))])
+#   nnmodel <- keras_model_sequential() %>%
+#   layer_dense(units=64, activation="relu", input_shape=trainingdim[[2]]) %>%
+#   layer_dense(units=64, activation="relu") %>%
+#   layer_dense(units=1) # number of outputs, here we just want one prediction
+#     
+#   nnmodel %>% # to compile the model, loss functions are defined here
+#     compile(optimizer="rmsprop", loss=keras::loss_mean_squared_error, metrics=c("mae"))
+#     
+#   # for resubstitution, where testing data and training data is the same
+#   if(groupingstyle=="resub"){
+#     trainsetpvs <- as.matrix(data[,c(15,18:(ncol(data)-1))])
+#     trainsetrv <- as.matrix(data$FLOW)
+#     nnmodel %>%  # this is to fit the model coefficients
+#       fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+#     predictions <- nnmodel %>% predict(trainsetpvs)
+#     predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+#     results <- cbind(obs=trainsetrv[ , 1], pred=predictions)
+#     modgof <- gof(as.data.frame(results)$pred, as.data.frame(results)$obs)
+#   }
+#   
+#   # for k-fold cross validation
+#   if(is.integer(groupingstyle)){
+#     group <- kfold(data, groupingstyle)
+#     results <- modgof <- list()
+#     for (k in 1:groupingstyle) {
+#       trainset <- data[group != k, ]
+#       testset <- data[group == k, ]
+#       
+#       # seperate into predictor variables and response variable
+#       testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+#       trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+#       testsetrv <- as.matrix(testset$FLOW)
+#       trainsetrv <- as.matrix(trainset$FLOW)
+#       
+#       nnmodel %>% 
+#         fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+#       predictions <- nnmodel %>% predict(testsetpvs)
+#       predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+#       results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+#       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+#     }
+#     names_tbd <- rownames(modgof[[1]])
+#     modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+#     rownames(modgof) <- names_tbd
+#   }
+#   
+#   # for leave one group (basin) out cross validation
+#   if(groupingstyle=="logo"){
+#     results <- modgof <- list()
+#   
+#     for (k in 1:(length(unique(data$CDEC_ID)))){
+#       h <- unique(data$CDEC_ID)[k]
+#       testset <- data[data$CDEC_ID==h,]
+#       trainset <- data[data$CDEC_ID!=h,]
+#       testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+#       trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+#       testsetrv <- as.matrix(testset$FLOW)
+#       trainsetrv <- as.matrix(trainset$FLOW)
+#       
+#       nnmodel %>%  
+#         fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+#       predictions <- nnmodel %>% predict(testsetpvs)
+#       predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+#       results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+#       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+#     }
+#     names_tbd <- rownames(modgof[[1]])
+#     modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+#     rownames(modgof) <- names_tbd
+#     colnames(modgof) <- unique(data$CDEC_ID)
+#   }
+#   
+#   # for random 5-fold leave multiple groups out cross validation, meaning a random 1/5 of the basins will be left out of training
+#   if(groupingstyle=="lmgo"){
+#     nfolds <- 5
+#     group <- as.data.frame(unique(data$CDEC_ID))
+#     colnames(group) <- "CDEC_ID"
+#     group$kftrain <- kfold(nrow(group), nfolds)
+#     data <- merge(data, group, by="CDEC_ID")
+#     
+#     results <- modgof <- list()
+#     for (k in 1:nfolds) {
+#       testset <- data[data$kftrain == k, ]
+#       trainset <- data[data$kftrain != k, ]
+#       testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+#       trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+#       testsetrv <- as.matrix(testset$FLOW)
+#       trainsetrv <- as.matrix(trainset$FLOW)
+#       
+#       nnmodel %>% 
+#         fit(trainsetpvs, trainsetrv, epochs=100, batch_size=25, verbose=1, validation_split=0.2)
+#       predictions <- nnmodel %>% predict(testsetpvs)
+#       predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+#       results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions)
+#       modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+#     }
+#     names_tbd <- rownames(modgof[[1]])
+#     modgof <- data.frame(matrix(unlist(modgof), nrow=length(modgof[[1]]), byrow=FALSE))
+#     rownames(modgof) <- names_tbd
+#   }
+#   
+#   if(groupingstyle=="resub"){
+#     list(results=results, gof=modgof)
+#   } else if(groupingstyle=="logo"){
+#     list(results=results, gof=modgof)
+#   } else{
+#     list(results=results, gof=modgof, kf=group)
+#   }
+# }
+# 
 # nn_agg_logo_results <- nncv(df_lm_agg, "logo", "agg")
 # nn_inc_logo_results <- nncv(df_lm_inc, "logo", "inc")
 # nn_cagg_logo_results <- nncv(df_lm_cagg, "logo", "agg")
@@ -842,7 +837,7 @@ nn_cinc_logo_results <- readRDS("ch2 data transformations/outputdata/rds/nn_cinc
 ```
 
 For saving results
-```{r data_results_df}
+```{r data_results_df} 
 # make a copy of the original dataframes to add the results to later
 results_lm_agg <- df_lm_agg
 results_lm_inc <- df_lm_inc
@@ -1319,7 +1314,7 @@ results_nn_cagg <- merge(results_nn_cagg, results_nn_cinc_cagg_long, by.x=c("DAT
 results_nn_cagg$LMLOGORES_AGG <- results_nn_cagg$LMLOGOFIT_AGG-results_nn_cagg$FLOW
 ```
 
-Now everything is in agg and cagg! so use results_lm_agg, results_lm_cagg, results_glm_agg, results_glm_cagg, results_rf_agg, results_rf_cagg
+Now everything is in agg and cagg! so use results_lm_agg, results_lm_cagg, results_glm_agg, results_glm_cagg, results_rf_agg, results_rf_cagg, results_nn_agg, results_nn_cagg
 
 ## 5.3 Cumulative Basins
 ```{r post_processing_lm_logo_cagg}
@@ -1492,7 +1487,7 @@ results_nn_agg$LMLOGORES_NONC <- results_nn_agg$LMLOGOFIT_NONC - results_nn_agg$
 results_nn_agg$LMLOGORES_AGG_NONC <- results_nn_agg$LMLOGOFIT_AGG_NONC - results_nn_agg$FLOW
 ```
 
-```{r results_cleanup} 
+```{r results_cleanup}
 # no longer needed 
 remove(n)
 remove(i)
@@ -1534,7 +1529,7 @@ results_glm <- results_glm_agg
 results_rf <- results_rf_agg
 results_nn <- results_nn_agg
 
-# merge lm and glm in case needed for comparison plots 
+# merge models in case needed for comparison plots 
 colnames(results_glm_agg)[43:51] <- c("GLMLOGOFIT", "GLMLOGORES", "CDEC_ID.y", "GLMLOGOFIT_AGG", "GLMLOGORES_AGG", "GLMLOGOFIT_NONC", "GLMLOGOFIT_AGG_NONC", "GLMLOGORES_NONC", "GLMLOGORES_AGG_NONC")
 colnames(results_rf_agg)[43:51] <- c("RFLOGOFIT", "RFLOGORES", "CDEC_ID.y", "RFLOGOFIT_AGG", "RFLOGORES_AGG", "RFLOGOFIT_NONC", "RFLOGOFIT_AGG_NONC", "RFLOGORES_NONC", "RFLOGORES_AGG_NONC")
 colnames(results_nn_agg)[43:51] <- c("NNLOGOFIT", "NNLOGORES", "CDEC_ID.y", "NNLOGOFIT_AGG", "NNLOGORES_AGG", "NNLOGOFIT_NONC", "NNLOGOFIT_AGG_NONC", "NNLOGORES_NONC", "NNLOGORES_AGG_NONC")
@@ -1548,8 +1543,19 @@ aggregate(FLOW ~ CDEC_ID, data = results_lm, FUN = length)
 aggregate(FLOW ~ CDEC_ID, data = results_glm, FUN = length)
 aggregate(FLOW ~ CDEC_ID, data = results_rf, FUN = length)
 aggregate(FLOW ~ CDEC_ID, data = results_nn, FUN = length)
+
+# quick look at the observed coefficient of variation by hierarchy (addressing Jay's comment)
+length_byh <- aggregate(FLOW ~ HIERARCHY, data = results_nn, FUN = length)
+sd_byh <- aggregate(FLOW ~ HIERARCHY, data = results_nn, FUN = sd)
+mean_byh <- aggregate(FLOW ~ HIERARCHY, data = results_nn, FUN = mean)
+coefofvar_byh <- sd_byh$FLOW/mean_byh$FLOW
+stats_byh <- data.frame(cbind(HIERARCHY=length_byh$HIERARCHY, LENGTH=length_byh$FLOW, SD=sd_byh$FLOW, MEAN=mean_byh$FLOW, COEFVAR=coefofvar_byh))
+stats_byh$HIERARCHY <- factor(stats_byh$HIERARCHY, levels=c("5", "4", "3", "2", "1"))
+
+# ggplot(stats_byh)+
+# geom_point(aes(x=COEFVAR, y=HIERARCHY))
 ```
-Now everything is in agg! so use results_lm, results_glm, results_rf, and results_nn for analysis and plots. 
+Now everything is in results_all!
 
 Note how we are not removing the epsilon (=1 AF) that we added to the FLOW for the glm modeling. It's just too small to worry about.  
 
@@ -1587,26 +1593,25 @@ lmanalysistests <- function(lmmodel){
 # modeltype can be: "lm", "glm", "rf", "nn"
 
 lmanalysisplots <- function(resultsdf, datatype, modeltype){
-  resultsdf_ordered <- resultsdf[order(resultsdf$FLOW),]
   # get the columns of interest
   if(datatype=="agg"){
-    res_of_interest <- resultsdf_ordered$LMLOGORES
-    fit_of_interest <- resultsdf_ordered$LMLOGOFIT
+    res_of_interest <- resultsdf$LMLOGORES
+    fit_of_interest <- resultsdf$LMLOGOFIT
   } else if(datatype=="inc"){
-    res_of_interest <- resultsdf_ordered$LMLOGORES_AGG
-    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_AGG    
+    res_of_interest <- resultsdf$LMLOGORES_AGG
+    fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
   } else if(datatype=="cagg"){
-    res_of_interest <- resultsdf_ordered$LMLOGORES_NONC
-    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_NONC    
+    res_of_interest <- resultsdf$LMLOGORES_NONC
+    fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
   } else { # for datatype=="cinc" case
-    res_of_interest <- resultsdf_ordered$LMLOGORES_AGG_NONC
-    fit_of_interest <- resultsdf_ordered$LMLOGOFIT_AGG_NONC   
+    res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
+    fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
   }
   
   # 1st plot: residuals v response
   png(paste0('ch2 data transformations/outputdata/rplot21_', modeltype, 'logo_residvresp_', datatype, '.png'), width=6.5, height=3, units="in", pointsize=8, res=1200)
   
-  plot(res_of_interest ~ resultsdf_ordered$FLOW, xlab="Unimpaired Flow (AF/m)", ylab="Residuals (AF/m)") # ylim=c(-1.5e7, 6e6), xlim=c(0, 2e7)
+  plot(res_of_interest ~ resultsdf$FLOW, xlab="Unimpaired Flow (AF/m)", ylab="Residuals (AF/m)") # ylim=c(-1.5e7, 6e6), xlim=c(0, 2e7)
   abline(h=0,lty=2, col=cbpblack[6])
   dev.off()
   
@@ -1913,7 +1918,7 @@ for (r in 1:(length(unique(results_all$CDEC_ID)))){
 ```
 
 # 8.0 Goodness of Fit 
-```{r mof_lm_glm}
+```{r mof_data} 
 gof_lm_agg <- gof(results_lm$LMLOGOFIT, results_lm$FLOW, na.rm=TRUE)
 gof_lm_inc <- gof(results_lm$LMLOGOFIT_AGG, results_lm$FLOW, na.rm=TRUE)
 gof_lm_cagg <- gof(results_lm$LMLOGOFIT_NONC, results_lm$FLOW, na.rm=TRUE)
@@ -1956,7 +1961,7 @@ library(xtable)
 xtable(data.frame(gof_all))
 ```
 
-```{r mof_lm_glm_rf_nn_bybasin}
+```{r mof_bybasin}
 # for plotting purposes, just do this for lm inc because it was the best model! did it for lm agg too, for purposes of comparison later. 
 
 # for lm
@@ -2062,377 +2067,176 @@ remove(names_tbd)
 
 # remove the cumulative ones, cause they are so bad
 goftablet <- data.frame(t(gof_all[, c("LM_AGG", "LM_INC", "GLM_AGG", "GLM_INC", "RF_AGG", "RF_INC", "NN_AGG", "NN_INC")]))
+goftablet$MODELTYPE <- sub("\\_.*", "", rownames(goftablet))  
+goftablet$DT <- sub(".*_", "", rownames(goftablet))
+goftablet$MODELTYPE <- factor(goftablet$MODELTYPE, levels=c("LM", "GLM", "RF", "NN"))
+goftablet$DT <- factor(goftablet$DT, levels=c("AGG", "INC"))
+goftablet$COLORS <- c(cbpblack[2], cbpblack[3], cbpblack[5], cbpblack[6])[goftablet$MODELTYPE]
 
-png('ch2 data transformations/outputdata/rplot26_gof_MSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$MSE, decreasing = TRUE),]
-  dotchart(goftablet$MSE, label=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Mean Squared Error (AF^2)", pch=19, xlim=c(min(goftablet$MSE), 1.1*max(goftablet$MSE)))
-  text(x=goftablet$MSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$MSE, digits=3, scientific=TRUE), pos=4, cex=1)
+DT.labs <- c("Aggregate (AGG)", "Incremental (INC)")
+names(DT.labs) <- c("AGG", "INC")
+MODELTYPE.labs <- c("Linear Model (LM)", "Generalized Linear Model (GLM)", "Random Forest (RF)", "Neural Network (NN)")
+names(MODELTYPE.labs) <- c("LM", "GLM", "RF", "NN")
+
+MOF_order <- c(rep(TRUE,7), rep(FALSE, 13))
+MOF_lab <- c("Mean Error (AF)", "Mean Absolute Error (AF)", "Mean Squared Error (AF^2)", "Root Mean Squared Error (AF)", "Normalized Root Mean Squared Error (AF^2)", "Percent Bias (-)", "RMSE to Standard Deviation of Observations Ratio (-)", "Ratio of Standard Deviations (-)", "Nash-Sutcliffe Efficiency (-)", "Modified Nash-Sutcliffe Efficiency (-)", "Relative Nash-Sutcliffe Efficiency (-)", "Index of Agreement (-)", "Modified Index of Agreement (-)", "Relative Index of Agreement (-)", "Persistence Index (-)", "Pearson Correlation coefficient (-)", "Coefficient of Determination (-)", "Bias-Corrected Coefficient of Determination (-)", "Kling-Gupta Efficiency (-)", "Volumetric Efficiency (AF)")
+
+# for (i in 1:20){
+#   MOF <- colnames(goftablet)[i]
+#   MOF_o <- MOF_order[i] # not working right now
+#   MOF_l <- MOF_lab[i]
+#   png(paste0('ch2 data transformations/outputdata/rplot26_gof_', MOF, '.png'), width=6.5, height=2, units="in", pointsize=8, res=1200)
+#   plottoprint <- ggplot(goftablet)+
+#     geom_point(aes_string(x = goftablet[,MOF], 
+#                           y=reorder(rownames(goftablet), goftablet[,MOF]), 
+#                           color=goftablet[, "MODELTYPE"], 
+#                           shape=goftablet[, "DT"]))+
+#     #scale_y_discrete(labels=var_labels[match(rownames(goftablet), names(var_labels))])+
+#     theme_bw(base_size = 8) +
+#     ylab("") +
+#     xlab(MOF_l) +
+#     xlim(min(goftablet[,MOF]), 1.05*max(goftablet[,MOF]))+
+#     theme(legend.position = "none", axis.text.y = element_text(colour=goftablet[order(goftablet[ , MOF]),]$COLOR)) +
+#     #legend.title = element_blank(), legend.text=element_text(size=10), text=element_text(size=10), legend.position = "right", legend.box = "vertical")+
+#     scale_colour_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[5], cbpblack[6])) + 
+#     scale_shape_manual(values=c(8, 16))+
+#     guides(colour = guide_legend(ncol=1), shape = guide_legend(ncol=1))+
+#     geom_text(aes(x = goftablet[,MOF], y = reorder(rownames(goftablet), goftablet[,MOF]), label=formatC(goftablet[ , MOF], format = "e", digits = 2)),hjust=-0.1, vjust=0, size = 2.5)
+#   print(plottoprint)
+# dev.off()
+# }
+
+# just for bR2 nd NSE
+plottoprint <- ggplot(goftablet)+
+  geom_point(aes_string(x = goftablet[,"bR2"], 
+                        y=reorder(rownames(goftablet), goftablet[,"bR2"]), 
+                        color=goftablet[, "MODELTYPE"], 
+                        shape=goftablet[, "DT"]))+
+  #scale_y_discrete(labels=var_labels[match(rownames(goftablet), names(var_labels))])+
+  theme_bw(base_size = 8) +
+  ylab("") +
+  xlab("Bias Corrected Coefficient of Determination (-)") +
+  xlim(0.2, 1)+
+  theme(legend.position = "none", axis.text.y = element_text(colour=goftablet[order(goftablet[ , "bR2"]),]$COLOR)) +
+  annotate("rect", xmin = 0.2, xmax = 0.5, ymin = 1, ymax = 8, fill= "grey55", alpha = 0.5) +
+  annotate("rect", xmin = 0.5, xmax = 0.65, ymin = 1, ymax = 8, fill= "grey70", alpha = 0.5) +
+  annotate("rect", xmin = 0.65, xmax = 0.75, ymin = 1, ymax = 8, fill= "grey85", alpha = 0.5) +
+  annotate("rect", xmin = 0.75, xmax = 1.0, ymin = 1, ymax = 8, fill= "grey95", alpha = 0.5) +
+  geom_text(aes(x= 0.35, y=8, label="Unsatisfactory"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.575, y=8, label="Satisfactory"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.7, y=8, label="Good"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.875, y=1, label="Very Good"), size=3, hjust="center", fontface=3)+
+  scale_colour_manual(aesthetics = c("colour"), values=c(cbpblack[2], cbpblack[3], cbpblack[5], cbpblack[6])) +
+  scale_shape_manual(values=c(8, 16))+
+  guides(colour = guide_legend(ncol=1), shape = guide_legend(ncol=1))+
+  geom_text(aes(x = goftablet[,"bR2"], y = reorder(rownames(goftablet), goftablet[, "bR2"]), label=goftablet[, "bR2"]), nudge_x = 0.03, size=3) 
+
+png(paste0('ch2 data transformations/outputdata/rplot26_gof_bR2.png'), width=6.5, height=2, units="in", pointsize=8, res=1200)
+  print(plottoprint)
 dev.off()
 
-png('ch2 data transformations/outputdata/rplot26_gof_RMSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$RMSE, decreasing = TRUE),]
-  dotchart(goftablet$RMSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Root Mean Squared Erro (AF)", pch=19, xlim=c(min(goftablet$RMSE), 1.1*max(goftablet$RMSE)))
-  text(x=goftablet$RMSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$RMSE, digits=3, scientific=TRUE), pos=4, cex=1)
-dev.off()
+plottoprint <- ggplot(goftablet)+
+  geom_point(aes_string(x = goftablet[,"NSE"], 
+                        y=reorder(rownames(goftablet), goftablet[,"NSE"]), 
+                        color=goftablet[, "MODELTYPE"], 
+                        shape=goftablet[, "DT"]))+
+  #scale_y_discrete(labels=var_labels[match(rownames(goftablet), names(var_labels))])+
+  theme_bw(base_size = 8) +
+  ylab("") +
+  xlab("Nash-Sutcliffe Efficiency Factor (-)") +
+  xlim(0.2, 1)+
+  theme(legend.position = "none", axis.text.y = element_text(colour=goftablet[order(goftablet[ , "NSE"]),]$COLOR)) +
+  annotate("rect", xmin = 0.2, xmax = 0.5, ymin = 1, ymax = 8, fill= "grey55", alpha = 0.5) +
+  annotate("rect", xmin = 0.5, xmax = 0.65, ymin = 1, ymax = 8, fill= "grey70", alpha = 0.5) +
+  annotate("rect", xmin = 0.65, xmax = 0.75, ymin = 1, ymax = 8, fill= "grey85", alpha = 0.5) +
+  annotate("rect", xmin = 0.75, xmax = 1.0, ymin = 1, ymax = 8, fill= "grey95", alpha = 0.5) +
+  geom_text(aes(x= 0.35, y=8, label="Unsatisfactory"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.575, y=8, label="Satisfactory"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.7, y=8, label="Good"), size=3, hjust="center", fontface=3)+
+  geom_text(aes(x= 0.875, y=8, label="Very Good"), size=3, hjust="center", fontface=3)+
+  scale_colour_manual(aesthetics = c("colour"), values=c(cbpblack[2], cbpblack[3], cbpblack[5], cbpblack[6])) +
+  scale_shape_manual(values=c(8, 16))+
+  guides(colour = guide_legend(ncol=1), shape = guide_legend(ncol=1))+
+  geom_text(aes(x = goftablet[,"NSE"], y = reorder(rownames(goftablet), goftablet[, "NSE"]), label=goftablet[, "NSE"]), nudge_x = 0.03, size=3) 
 
-png('ch2 data transformations/outputdata/rplot26_gof_bR2.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$bR2),]
-  dotchart(goftablet$bR2, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Bias-Corrected Coefficient of Determination (-)", pch=19, xlim=c(0,1.05))
-  text(x=goftablet$bR2, y=1:nrow(goftablet), labels=round(goftablet$bR2,2), pos=4, cex=1)
-dev.off()
-
-png('ch2 data transformations/outputdata/rplot26_gof_NSE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$NSE),]
-  dotchart(goftablet$NSE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Nash-Sutcliffe Efficiency (-)", pch=19, xlim=c(min(goftablet$NSE), 1.0))
-  text(x=goftablet$NSE, y=1:nrow(goftablet), labels=prettyNum(goftablet$NSE, digits=3, scientific=FALSE), pos=4, cex=1)
-dev.off()
-
-png('ch2 data transformations/outputdata/rplot26_gof_KGE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$KGE),]
-  dotchart(goftablet$KGE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Kling-Gupta Efficiency (-)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$KGE), 1.1))
-  text(x=goftablet$KGE, y=1:nrow(goftablet), labels=prettyNum(goftablet$KGE, digits=3, scientific=FALSE), pos=4, cex=1)
-dev.off()
-
-png('ch2 data transformations/outputdata/rplot26_gof_VE.png', width=6.5, height=2, units="in", pointsize=8, res=1200)
-  par(mar=c(2,4,1,1)+0.1, cex=1)
-  goftablet <- goftablet[order(goftablet$VE),]
-  dotchart(goftablet$VE, labels=var_labels[match(rownames(goftablet), names(var_labels))], xlab="Volumetric Efficiency (AF)", groups=goftablet$GROUPS, pch=19, xlim=c(min(goftablet$VE), 1))
-  text(x=goftablet$VE, y=1:nrow(goftablet), labels=prettyNum(goftablet$VE, digits=3, scientific=FALSE), pos=4, cex=1)
+png(paste0('ch2 data transformations/outputdata/rplot26_gof_NSE.png'), width=6.5, height=2, units="in", pointsize=8, res=1200)
+  print(plottoprint)
 dev.off()
 ```
 
 ```{r obsvpred_plots}
-# smoothScatter plots
-obsvpredplot <- function(resultsdf, datatype, modelform){
-  # get the columns of interest
-  if(datatype=="agg"){
-    res_of_interest <- resultsdf$LMLOGORES
-    fit_of_interest <- resultsdf$LMLOGOFIT
-  } else if(datatype=="inc"){
-    res_of_interest <- resultsdf$LMLOGORES_AGG
-    fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
-  } else if(datatype=="cagg"){
-    res_of_interest <- resultsdf$LMLOGORES_NONC
-    fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
-  } else { # for datatype=="cinc" case
-    res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
-    fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
-  }
-  
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-  par(mar=c(4,4,3,1)+0.1, cex=1)
-  
-  # not producing nice results
-  # ggplot(data = resultsdf, aes(FLOW, fit_of_interest)) +
-  #   stat_density2d(aes(fill = ..density..^0.25), geom = "tile", contour = FALSE, n = 200, alpha=1) +
-  #   scale_fill_continuous(low = "white", high = cbpblack[6]) +
-  #   theme_bw() +
-  #   geom_point(alpha = 1, shape = 19, size=0.05) +
-  #   theme(legend.position = "none") +
-  #   xlab("Observed Unimpaired Flow (AF/m)") +
-  #   ylab("Predicted Unimpaired Flow (AF/m)")
-  
-    smoothScatter(resultsdf$FLOW, fit_of_interest, colramp = colorRampPalette(c("white", cbpblack[1])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)")
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(fit_of_interest~resultsdf$FLOW)
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(fit_of_interest, resultsdf$FLOW)[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-}
+library(reshape2)
+library(ggplot2)
+master_dt <- results_all[,c("HIERARCHY", "FLOW", "LMLOGOFIT", "LMLOGOFIT_AGG", "GLMLOGOFIT", "GLMLOGOFIT_AGG", "RFLOGOFIT", "RFLOGOFIT_AGG", "NNLOGOFIT", "NNLOGOFIT_AGG")]
+master_dt$HIERARCHY <- factor(master_dt$HIERARCHY, levels=c("1", "2", "3", "4", "5"))
 
-# obsvpredplot(results_lm, "agg", "lm")
-# obsvpredplot(results_lm, "inc", "lm")
-# obsvpredplot(results_lm, "cagg", "lm")
-# obsvpredplot(results_lm, "cinc", "lm")
-# 
-# obsvpredplot(results_glm, "agg", "glm")
-# obsvpredplot(results_glm, "inc", "glm")
-# obsvpredplot(results_glm, "cagg", "glm")
-# obsvpredplot(results_glm, "cinc", "glm")
+master_dt_melted <- melt(master_dt, id.vars=c("HIERARCHY", "FLOW"), measure.vars=c("LMLOGOFIT", "LMLOGOFIT_AGG", "GLMLOGOFIT", "GLMLOGOFIT_AGG", "RFLOGOFIT", "RFLOGOFIT_AGG", "NNLOGOFIT", "NNLOGOFIT_AGG"), variable.name="MODELTYPEDT", value.name="PRED")
+master_dt_melted$MODELTYPE <- sub("LOGO.*", "", master_dt_melted$MODELTYPEDT) 
+master_dt_melted$MODELTYPE <- factor(master_dt_melted$MODELTYPE, levels=c("LM", "GLM", "RF", "NN"))
+master_dt_melted$DT <- ifelse(sub(".*FIT", "", master_dt_melted$MODELTYPEDT)=="", "AGG", "INC")
+master_dt_melted$DT <- factor(master_dt_melted$DT, levels=c("AGG", "INC"))
 
-# colour by hierrarchy smoothScatter plots
-obsvpredplot2 <- function(resultsdf, datatype, modelform){
-  if(datatype=="agg"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT
-  } else if(datatype=="inc"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
-  } else if(datatype=="cagg"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_NONC
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
-  } else { # for datatype=="cinc" case
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
-  }
-  
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h1.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,1)+0.1, cex=1)
-    smoothScatter(resultsdf[resultsdf$HIERARCHY==1, "FLOW"], resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[2])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==1, "FLOW"])
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==1, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==1, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-    
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h2.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,1)+0.1, cex=1)
-    smoothScatter(resultsdf[resultsdf$HIERARCHY==2, "FLOW"], resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[3])),  xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==2, "FLOW"])
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==2, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==2, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-    
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h3.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,1)+0.1, cex=1)
-    smoothScatter(resultsdf[resultsdf$HIERARCHY==3, "FLOW"], resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[4])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==3, "FLOW"])
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==3, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==3, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-    
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h4.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,1)+0.1, cex=1)
-    smoothScatter(resultsdf[resultsdf$HIERARCHY==4, "FLOW"], resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[5])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==4, "FLOW"])
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==4, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==4, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-    
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred_', modelform, "_", datatype, 'h5.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,1)+0.1, cex=1)
-    smoothScatter(resultsdf[resultsdf$HIERARCHY==5, "FLOW"], resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"], colramp = colorRampPalette(c("white", cbpblack[6])), xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", ylim=c(min(resultsdf[, "fit_of_interest"]), max(resultsdf[, "fit_of_interest"])))
-    abline(0,1, col="grey70", lty=2, lwd=2)
-    lmline <- lm(resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"]~resultsdf[resultsdf$HIERARCHY==5, "FLOW"])
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(2,1), lwd=c(2,1), col=c("grey70",cbpblack[8]), bg="grey96", xpd=TRUE)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.1)
-    mtext(paste("Model bR2:", round(gof(resultsdf[resultsdf$HIERARCHY==5, "fit_of_interest"], resultsdf[resultsdf$HIERARCHY==5, "FLOW"])[18], 2)), side=3, line=0.3, cex=0.8, adj=0.1)
-  dev.off()
-}
-  
-# obsvpredplot2(results_lm, "agg", "lm")
-# obsvpredplot2(results_lm, "inc", "lm")
-# obsvpredplot2(results_lm, "cagg", "lm")
-# obsvpredplot2(results_lm, "cinc", "lm")
-# 
-# obsvpredplot2(results_glm, "agg", "glm")
-# obsvpredplot2(results_glm, "inc", "glm")
-# obsvpredplot2(results_glm, "cagg", "glm")
-# obsvpredplot2(results_glm, "cinc", "glm")
+DT.labs <- c("Aggregate (AGG)", "Incremental (INC)")
+names(DT.labs) <- c("AGG", "INC")
+MODELTYPE.labs <- c("Linear Model (LM)", "Generalized Linear Model (GLM)", "Random Forest (RF)", "Neural Network (NN)")
+names(MODELTYPE.labs) <- c("LM", "GLM", "RF", "NN")
 
-# color by hierarchy plot, use these in paper
-obsvpredplot3 <- function(resultsdf, datatype, modelform, legendpos){
-  if(datatype=="agg"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT
-  } else if(datatype=="inc"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG    
-  } else if(datatype=="cagg"){
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_NONC
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_NONC    
-  } else { # for datatype=="cinc" case
-      resultsdf$res_of_interest <- resultsdf$LMLOGORES_AGG_NONC
-      resultsdf$fit_of_interest <- resultsdf$LMLOGOFIT_AGG_NONC   
-  }
-  
-  # find y and x limits
-  xlower <- min(resultsdf$FLOW, na.rm=TRUE)
-  xupper <- max(resultsdf$FLOW, na.rm=TRUE)
-  ylower <- min(resultsdf$fit_of_interest, na.rm=TRUE)
-  yupper <- max(resultsdf$fit_of_interest, na.rm=TRUE)
-  xylower <- min(xlower, ylower)
-  xyupper <- max(xupper, yupper)
-  
-  png(paste0('ch2 data transformations/outputdata/rplot27_obsvspred2_', modelform, "_", datatype, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-    par(mar=c(4,4,3,3)+0.1, cex=1)
-    plot(resultsdf$FLOW, resultsdf$fit_of_interest, col=cbpblack[2:6][resultsdf$HIERARCHY], xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-    abline(0,1, col="grey70", lty=3, lwd=2)
-    lmline <- lm(resultsdf$fit_of_interest~resultsdf$FLOW)
-    abline(lmline, col=cbpblack[8])
-    legend("topright", horiz=TRUE, inset=c(0.01, -0.14), cex=0.6, legend=c(1:5), title= "Basin Hierarchy", pch=19, col=cbpblack[2:6], bg="grey96", box.lty=0, xpd=TRUE, xjust=1, title.adj=0)
-    legend(legendpos, horiz=FALSE, inset=c(0.01, 0.01), cex=0.6, c("Y = X line", "regression line"), lty=c(3,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="grey96", xpd=TRUE, box.lty=0)
-    mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=1, cex=0.8, adj=0.01)
-    # mtext(paste("bR2:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-    mtext(paste("Model NSE:", round(gof(resultsdf$fit_of_interest, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  dev.off()
-}
-
-obsvpredplot3(results_lm, "agg", "lm", "topleft") 
-obsvpredplot3(results_lm, "inc", "lm", "topleft") 
-obsvpredplot3(results_lm, "cagg", "lm", "topright") 
-obsvpredplot3(results_lm, "cinc", "lm", "topright") 
-
-obsvpredplot3(results_glm, "agg", "glm", "bottomright") 
-obsvpredplot3(results_glm, "inc", "glm", "bottomright") 
-obsvpredplot3(results_glm, "cagg", "glm", "bottomright") 
-obsvpredplot3(results_glm, "cinc", "glm", "bottomright")
-
-obsvpredplot3(results_rf, "agg", "rf", "topleft") 
-obsvpredplot3(results_rf, "inc", "rf", "topleft") 
-obsvpredplot3(results_rf, "cagg", "rf", "topright") 
-obsvpredplot3(results_rf, "cinc", "rf", "topright") 
-
-obsvpredplot3(results_nn, "agg", "nn", "topleft") 
-obsvpredplot3(results_nn, "inc", "nn", "topleft") 
-obsvpredplot3(results_nn, "cagg", "nn", "topright") 
-obsvpredplot3(results_nn, "cinc", "nn", "topright") 
-
-# FIND THE OTHER PROBLEM BASINS!
-# png(paste0('ch2 data transformations/outputdata/rplot27_tbd.png'), width=3.25, height=2.85, units="in", pointsize=8, res=1200)
-#   plot(results_glm[results_glm$CDEC_ID=="KLO", "FLOW"], results_glm[results_glm$CDEC_ID=="KLO", "LMLOGOFIT"] , xlab="Observed Unimpaired Flow (AF/m)", ylab="Predicted Unimpaired Flow (AF/m)", xlim=c(0,4e6), ylim=c(0,3e8), pch=19)
-# dev.off()
-```
-
-```{r obsvpredplot_forpaper}
-# when you have picked what models to show, use this
+library(ggpmisc)
 png('ch2 data transformations/outputdata/rplot27_obsvspred_all.png', width=6.5, height=8, units="in", pointsize=8, res=1200)
-  op <- par(mfrow = c(4, 2),     # 4x2 layout
-        oma = c(5, 4, 5, 5),     # two rows of text at the outer left and bottom margin
-        mar = c(1, 1, 1, 1)+0.1, # space for one row of text at ticks and to separate plots
-        mgp = c(2, 1, 0),        # axis label at 2 rows distance, tick labels at 1 row
-        xpd = FALSE)             # allow content to protrude into outer margin (and beyond)
-    
-  # par(mfrow = c(4,2), oma = c(2,2,0,0), mar = c(1,1,0,0))
-  
-  # find y and x limits
-  xlower <- min(results_all$FLOW, na.rm=TRUE)
-  xupper <- max(results_all$FLOW, na.rm=TRUE)
-  ylower <- min(results_all$LMLOGOFIT, na.rm=TRUE)
-  yupper <- max(results_all$LMLOGOFIT, na.rm=TRUE)
-  xylower <- min(xlower, ylower)
-  xyupper <- max(xupper, yupper)
-  
-  plot(results_all$FLOW, results_all$LMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$LMLOGOFIT~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  mtext("Aggregate", side=3, line=1)
-  
-  plot(results_all$FLOW, results_all$LMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$LMLOGOFIT_AGG~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$LMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$LMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  mtext("Incremental", side=3, line=1)
-  mtext("LM", side=4, line=1)
-  
-  plot(results_all$FLOW, results_all$GLMLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$GLMLOGOFIT~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  
-  plot(results_all$FLOW, results_all$GLMLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$GLMLOGOFIT_AGG~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$GLMLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$GLMLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  mtext("GLM", side=4, line=1)
-  
-  plot(results_all$FLOW, results_all$RFLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$RFLOGOFIT~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  
-  plot(results_all$FLOW, results_all$RFLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$RFLOGOFIT_AGG~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$RFLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$RFLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  mtext("RF", side=4, line=1)
-  
-  plot(results_all$FLOW, results_all$NNLOGOFIT, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$NNLOGOFIT~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), c("Y = X line", "Regression line"), lty=c(3,1), lwd=c(2,1), col=c("grey70", cbpblack[8]), bg="white", box.lty=0)
-  
-  plot(results_all$FLOW, results_all$NNLOGOFIT_AGG, col=cbpblack[2:6][results_all$HIERARCHY], xlab="", ylab="", pch=19, xlim=c(xylower, xyupper), ylim=c(xylower, xyupper))
-  abline(0,1, col="grey70", lty=3, lwd=2)
-  lmline <- lm(results_all$NNLOGOFIT_AGG~results_all$FLOW)
-  abline(lmline, col=cbpblack[8])
-  mtext(paste("Y =", round(lmline$coefficients[2],3), "X +", round(lmline$coefficients[1],0)), side=3, line=-1.2, cex=0.8, adj=0.04)
-  # mtext(paste("bR2:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[18], 2), ", NSE:", round(gof(resultsdf$NNLOGOFIT_AGG, resultsdf$FLOW)[9], 2)), side=3, line=0.3, cex=0.8, adj=0.01)
-  mtext(paste("Model NSE:", round(gof(results_all$NNLOGOFIT_AGG, results_all$FLOW)[9], 2)), side=3, line=-2.2, cex=0.8, adj=0.04)
-  mtext("NN", side=4, line=1)
-  legend("bottomright", horiz=FALSE, inset=c(0.01, 0.01), legend=c(1:5), title= "Basin \nHierarchy", pch=19, col=cbpblack[2:6], bg="white", box.lty=0, xjust=1, title.adj=0)
-  title(xlab = "Observed Unimpaired Flow (AF/m)", ylab = "Predicted Unimpaired Flow (AF/m)", outer = TRUE, line = 2)
-  par(op)
+  plottoprint <- ggplot(master_dt_melted, aes(x=FLOW, y=PRED)) +
+    geom_point(aes(group=HIERARCHY, colour=HIERARCHY, shape=HIERARCHY)) +
+    geom_smooth(method="lm", se=FALSE, color="black")+
+    stat_poly_eq(formula = y ~ x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+    geom_abline(slope=1, intercept=0, color="black", linetype=3)+
+    facet_grid(MODELTYPE~DT, labeller=labeller(DT=DT.labs, MODELTYPE=MODELTYPE.labs))+
+    scale_discrete_manual(aesthetics="color", values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+    scale_discrete_manual(aesthetics= "shape", values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+    labs(x ="Observed Unimpaired Flow (AF/m)", y = "Predicted Unimpaired Flow (AF/m)", color = "")+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+  print(plottoprint)
 dev.off()
 ```
 
-```{r error_density_plots}
-# not done yet
-# density plots of obs and pred data
-plot(density(results_lm$FLOW), main="")
-rug(jitter(results_lm$FLOW))
-lines(density(results_lm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[2])
-lines(density(results_lm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[3])
-lines(density(results_lm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[4])
-lines(density(results_lm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpblack[5])
-lines(density(results_glm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[6])
-lines(density(results_glm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[7])
-lines(density(results_glm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[8])
-lines(density(results_glm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpgrey[1])
+```{r error_density_plot_for_paper}
+masterdt_lm <- results_all[,c("FLOW", "LMLOGOFIT", "LMLOGOFIT_AGG")]
+masterdt_glm <- results_all[,c("FLOW", "GLMLOGOFIT", "GLMLOGOFIT_AGG")]
+masterdt_rf <- results_all[,c("FLOW", "RFLOGOFIT", "RFLOGOFIT_AGG")]
+masterdt_nn <- results_all[,c("FLOW", "NNLOGOFIT", "NNLOGOFIT_AGG")]
 
-plot(density(results_glm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpgrey[1], main="")
-lines(density(results_lm$FLOW), col="black")
-rug(jitter(results_lm$FLOW))
-lines(density(results_lm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[2])
-lines(density(results_lm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[3])
-lines(density(results_lm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[4])
-lines(density(results_lm$LMLOGOFIT_AGG_NONC, na.rm = TRUE), col=cbpblack[5])
-lines(density(results_glm$LMLOGOFIT, na.rm = TRUE), col=cbpblack[6])
-lines(density(results_glm$LMLOGOFIT_AGG, na.rm = TRUE), col=cbpblack[7])
-lines(density(results_glm$LMLOGOFIT_NONC, na.rm = TRUE), col=cbpblack[8])
+masterdt_lm$MODELTYPE <- "LM"
+masterdt_glm$MODELTYPE <- "GLM"
+masterdt_rf$MODELTYPE <- "RF"
+masterdt_nn$MODELTYPE <- "NN"
 
-# ggplot(results_lm) + geom_density(aes(x = yield, fill = site), alpha = 0.2)
+colnames(masterdt_lm)[1:3] <- colnames(masterdt_glm)[1:3] <- colnames(masterdt_rf)[1:3] <- colnames(masterdt_nn)[1:3] <- c("OBS", "AGG", "INC")
 
-results_all_melted <- melt(results_all[,c("DATE", "CDEC_ID", "FLOW", "LMLOGOFIT", "LMLOGOFIT_AGG", "LMLOGOFIT_NONC", "LMLOGOFIT_AGG_NONC", "GLMLOGOFIT", "GLMLOGOFIT_AGG", "GLMLOGOFIT_NONC", "GLMLOGOFIT_AGG_NONC")], id.vars=c("DATE", "CDEC_ID"))
-results_all_melted <- na.omit(results_all_melted)
-ggplot(results_all_melted, aes(x = value), alpha = 0.2) +
-  geom_density(aes(color = variable)) +
-  ylim(0, 1.5e-5) +
-  xlim(0, 4e6) +
-  scale_color_manual(values=c(cbpblack, cbpgrey[1]))+
-  theme_bw()
+master_dt <- rbind(masterdt_lm, masterdt_glm, masterdt_rf, masterdt_nn)
+master_dt_melted <- melt(master_dt, measure.vars= c("AGG", "INC"), variable.name="DATASTYLE", value.name="FLOW")
+master_dt_melted$MODELTYPE <- factor(master_dt_melted$MODELTYPE, levels=c("LM", "GLM", "RF", "NN"))
+master_dt_melted$DATASTYLE <- factor(master_dt_melted$DATASTYLE, levels=c("AGG", "INC"))
+
+MODELTYPE.labs <- c("Linear Model (LM)", "Generalized Linear Model (GLM)", "Random Forest (RF)", "Neural Network (NN)")
+names(MODELTYPE.labs) <- c("LM", "GLM", "RF", "NN")
+
+png('ch2 data transformations/outputdata/rplot216_density_all.png', width=3.25*2, height=2.85*2, units="in", pointsize=8, res=1200)
+  plottoprint <- ggplot(master_dt_melted) +
+    geom_density(aes(x=FLOW, group=DATASTYLE, colour=DATASTYLE, linetype=DATASTYLE), position=position_dodge(width=0.2)) +
+    facet_wrap(~MODELTYPE, labeller=labeller(MODELTYPE=MODELTYPE.labs))+
+    scale_color_manual(values=c(cbpblack[7], cbpblack[8]), name="Pred", breaks = c("AGG", "INC"), labels=c("AGG", "INC"))+ 
+    scale_linetype_manual(values=c("dashed", "dotted"), labels=c("AGG", "INC"), name="Pred", breaks=c("AGG", "INC"))+
+    geom_density(aes(x=OBS, fill=""), alpha=0.2) +
+    scale_discrete_manual(aesthetics = "fill", values=cbpblack[1], name="Obs")+
+    guides(fill = guide_legend(override.aes = list(alpha = 0.2)))+
+    scale_x_continuous(trans="log10")+
+    labs(x ="Unimpaired Flow (AF/m)", y = "Density or Frequency of Occurance (%)", color = "")+
+    annotation_logticks(sides="b")+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+  print(plottoprint)
+dev.off()
 ```
 
 ```{r error_mapplots}
@@ -2481,7 +2285,7 @@ rmsemap(gof_glm_agg_by_basins, "agg", "glm")
 rmsemap(gof_nn_inc_by_basins, "inc", "nn")
 rmsemap(gof_nn_agg_by_basins, "agg", "nn")
 
-br2map <- function(gof_results, datatype, modelform){ 
+br2map <- function(gof_results, datatype, modelform){  
   basinsc <- basins_points
   results <- data.frame(t(gof_results))
   results$CDEC_ID <- rownames(results)
@@ -2628,7 +2432,7 @@ vemap(gof_nn_inc_by_basins, "inc", "nn")
 vemap(gof_nn_agg_by_basins, "agg", "nn")
 ```
 
-```{r spacial_hierarchy_plot}
+```{r spatial_hierarchy_plot}
 basinsc <- basins_points
 basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") +  (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
 counties <- list(first=TRUE, "sp.polygons", cacounties, fill="gray88", col="white")
@@ -2658,143 +2462,35 @@ dev.off()
 
 ```{r error_hierarchy_plots}
 # plot errors by location in the hierarchy
-# datatype can be: "agg", "cagg", "inc", "cinc"
 # fitofinterest can be anything returned by the gof function
-  
-gofdotchart <- function(gof_results, datatype, modelform, fitofinterest){ 
-  basinsc <- basins_points
-  results <- data.frame(t(gof_results))
-  results$CDEC_ID <- rownames(results)
-  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
-  basinsc <- basinsc@data[order(basinsc@data[, fitofinterest], decreasing=TRUE), ]
-  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
-  grps <- as.factor(basinsc$HIERARCHY)
-  
-  # for the y position of the labels on the points in the dotchart, we have to do all this crazy business
-  tbdvector <- c(basinsc[which(basinsc[, "HIERARCHY"]==1), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==2), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==3), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==4), "CDEC_ID"], basinsc[which(basinsc[, "HIERARCHY"]==5), "CDEC_ID"])
-  tbdvector <- data.frame(cbind(tbdvector, ylabels=c(30:76, 16:27, 9:13, 4:6, 1)))
-  basinsc <- merge(basinsc, tbdvector, by.x="CDEC_ID", by.y="tbdvector")
-  basinsc <- basinsc[order(basinsc[, fitofinterest], decreasing=TRUE), ]
-  
-  tbdmin <- basinsc[, fitofinterest]
-  tbdmin <- tbdmin[which(tbdmin>-Inf)]
-  minxlim <- min(tbdmin, na.rm = TRUE)
-  
-  if(fitofinterest=="ME"){
-    fitofinterestlabel <- "Mean Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
-  } else if(fitofinterest=="MAE"){
-    fitofinterestlabel <- "Mean Absolute Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
-  } else if(fitofinterest=="MSE"){
-    fitofinterestlabel <- "Mean Squared Error (AF^2)"
-    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
-  } else if(fitofinterest=="RMSE"){
-    fitofinterestlabel <- "Root Mean Squared Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
-  } else if(fitofinterest=="NRMSE.."){
-    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
-    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
-  } else if(fitofinterest=="PBIAS.."){
-    fitofinterestlabel <- "Percent Bias (-)"
-    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
-  } else if(fitofinterest=="RSR"){
-    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
-    maxxlim <- 67
-  } else if(fitofinterest=="NSE"){
-    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 500
-  } else if(fitofinterest=="rSD"){
-    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
-    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
-  } else if(fitofinterest=="mNSE"){
-    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 5
-  } else if(fitofinterest=="rNSE"){
-    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 5e5
-  } else if(fitofinterest=="d"){
-    fitofinterestlabel <- "Index of Agreement (-)"
-    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
-  } else if(fitofinterest=="md"){
-    fitofinterestlabel <- "Modified Index of Agreement (-)"
-    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
-  } else if(fitofinterest=="rd"){
-    fitofinterestlabel <- "Relative Index of Agreement (-)"
-    maxxlim <- 100
-  } else if(fitofinterest=="cp"){
-    fitofinterestlabel <- "Persistence Index (-)"
-    maxxlim <- 200
-  } else if(fitofinterest=="r"){
-    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
-    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
-  } else if(fitofinterest=="R2"){
-    fitofinterestlabel <- "Coefficient of Determination (-)"
-    maxxlim <- 1.0
-  } else if(fitofinterest=="bR2"){
-    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
-    maxxlim <- 1.0
-  } else if(fitofinterest=="KGE"){
-    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
-    maxxlim <- 10
-  } else if(fitofinterest=="VE"){
-    fitofinterestlabel <- "Volumetric Efficiency (AF)"
-    maxxlim <- 6
-  } else{
-    print("Input a measure of fit provided by the gof function in HydroGOF package!")
-  }
-  
-  png(paste0('ch2 data transformations/outputdata/rplot29_', fitofinterest, "dotchart_", modelform, "_", datatype, '.png'), width=6.5, height=8, units="in", pointsize=8, res=1200)
-    dotchart(basinsc[, fitofinterest], xlab=fitofinterestlabel, ylab="", labels=basinsc$CDEC_ID, group=grps, cex=0.8, pch=19, color="black", xlim=c(minxlim, maxxlim))
-    mtext("Basin Hierarchies", side=2, line=2, cex=0.8)
-    text(x=basinsc[, fitofinterest], y=as.numeric(as.character(basinsc$ylabels)), labels=prettyNum(basinsc[, fitofinterest], digits=2), pos=4, cex=1)
-  dev.off()
-}
 
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "ME")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "MAE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "MSE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "RMSE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "NRMSE..")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "PBIAS..")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "RSR")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rSD")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "NSE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "mNSE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rNSE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "d")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "md")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "rd")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "cp")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "r")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "R2")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "bR2")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "KGE")
-# gofdotchart(gof_lm_inc_by_basins, "inc", "lm", "VE")
-# 
-# gofdotchart(gof_rf_inc_by_basins, "inc", "rf", "bR2")
-# gofdotchart(gof_rf_inc_by_basins, "inc", "rf", "NSE")
-
-# agg and inc comparisons
-gofdotchart2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendpos){
+gofdotchart <- function(gof_results_agg, gof_results_inc, fitofinterest){
   tgof_results_agg <- data.frame(t(gof_results_agg))
   tgof_results_agg$CDEC_ID <- rownames(tgof_results_agg)
   basinsc <- basins_points@data
   basinsc <- merge(basinsc, tgof_results_agg, by="CDEC_ID", all=TRUE)
+  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
+  basinsc$DT <- "AGG"
+  
   tgof_results_inc <- data.frame(t(gof_results_inc))
   tgof_results_inc$CDEC_ID <- rownames(tgof_results_inc)
   basinsc2 <- basins_points@data
   basinsc2 <- merge(basinsc2, tgof_results_inc, by="CDEC_ID", all=TRUE)
-
-  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
   basinsc2$HIERARCHY <- (basinsc2$STATIONS_ABOVE1!="none") + (basinsc2$STATIONS_ABOVE2!="none") + (basinsc2$STATIONS_ABOVE3!="none") + (basinsc2$STATIONS_ABOVE4!="none") + 1
-  basinsc2 <- basinsc2[order(basinsc2[, fitofinterest], decreasing=TRUE), ]
+  basinsc2$DT <- "INC"
 
-  basinsm <- merge(basinsc2, basinsc, by="CDEC_ID")
-  basinsm <- basinsm[order(basinsm[, paste0(fitofinterest, ".x")], decreasing=TRUE), ]
-  tbdmin <- basinsm[, paste0(fitofinterest, ".x")]
-  tbdmin <- tbdmin[which(tbdmin>-Inf)]
-  minxlim <- min(tbdmin, na.rm = TRUE)
+  basinscr <- melt(basinsc, id.vars=c("CDEC_ID", "DT", "HIERARCHY"), variable.name = "GOF", value.name="VALUE", measure.vars = fitofinterest)
+  basinsc2r <- melt(basinsc2, id.vars=c("CDEC_ID", "DT", "HIERARCHY"), variable.name = "GOF", value.name="VALUE", measure.vars = fitofinterest)
+  
+  # order based on INC values decreasing
+  orderrownums <- as.numeric(row.names(basinsc2r[order(basinsc2r$VALUE, decreasing=TRUE), ]))
+  basinscr <- basinscr[orderrownums, ]
+  basinsc2r <- basinsc2r[orderrownums, ]
+  
+  # bind aacross the different transformation styles
+  basinscm <- rbind(basinscr, basinsc2r)
+  basinscm$DT <- factor(basinscm$DT, levels = c("AGG", "INC"))
+  basinscm$CDEC_ID <- factor(basinscm$CDEC_ID, levels=basinscm$CDEC_ID[1:67])
   
   if(fitofinterest=="ME"){
     fitofinterestlabel <- "Mean Error (AF)"
@@ -2862,140 +2558,31 @@ gofdotchart2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legend
     print("Input a measure of fit provided by the gof function in HydroGOF package!")
   }
   
+  plottoprint <- ggplot(data=basinscm, aes(x=VALUE, y=CDEC_ID)) +
+    geom_point(aes(shape=DT, color=DT), size=2)+
+    facet_grid(HIERARCHY ~ ., scales = "free", space = "free") +
+    scale_shape_manual(name="Type", breaks = c("AGG", "INC"), values=c(8, 16)) + 
+    scale_colour_manual(name="Type", aesthetics = c("colour"), values=c(cbpblack[7], cbpblack[8]), breaks = c("AGG", "INC")) +
+    labs(x=fitofinterestlabel, y="")+
+    theme_bw() +
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(nrow = 2), shape= guide_legend(nrow = 2))
+
   png(paste0('ch2 data transformations/outputdata/rplot211_', fitofinterest, 'dotchart_comp.png'), width=6.5, height=8, units="in", pointsize=8, res=1200)
-    dotchart(basinsm[, paste0(fitofinterest, ".x")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=19, color="black", xlim=c(minxlim, maxxlim))
-    mtext("Basin Hierarchies", side=2, line=2, cex=0.8)
-    # to allow over plotting
-    par(new=TRUE)
-    basinsm$mycol <- as.integer(basinsm[, paste0(fitofinterest, ".y")]>basinsm[, paste0(fitofinterest, ".x")])+7
-    mycol <- cbpblack[basinsm$mycol]
-    dotchart(basinsm[, paste0(fitofinterest, ".y")], xlab=fitofinterestlabel, ylab="", labels=basinsm$CDEC_ID, group=as.factor(basinsm$HIERARCHY.x), cex=0.8, pch=2, xlim=c(minxlim, maxxlim), col=mycol )
-    legend(legendpos, pch=c(19,2,2,2), c("inc", "agg", "agg>inc", "inc>agg"), col=c("black", "black", cbpblack[8], cbpblack[7]), bg="grey96", horiz=FALSE, inset=c(0.01, 0.01), cex=0.8, box.lty=0)
-  dev.off()
-}
-
-# gofdotchart2(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "NSE", "topleft")
-# gofdotchart2(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "bR2", "topright")
-# gofdotchart2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "NSE", "left")
-# gofdotchart2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2", "topright")
-gofdotchart2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "NSE", "left")
-gofdotchart2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
-```
-
-```{r boxplot}
-gofboxplot <- function(gof_results, datatype, modelform, fitofinterest){ 
-  basinsc <- basins_points
-  results <- data.frame(t(gof_results))
-  results$CDEC_ID <- rownames(results)
-  basinsc <- merge(basinsc, results, by="CDEC_ID", all=TRUE)
-  basinsc <- basinsc@data[order(basinsc@data[, fitofinterest], decreasing=TRUE), ]
-  basinsc$HIERARCHY <- (basinsc$STATIONS_ABOVE1!="none") + (basinsc$STATIONS_ABOVE2!="none") + (basinsc$STATIONS_ABOVE3!="none") + (basinsc$STATIONS_ABOVE4!="none") + 1
-  basinsc$GRPS <- as.factor(basinsc$HIERARCHY)
-  basinsc <- basinsc[order(basinsc[, fitofinterest], decreasing=TRUE), ]
-  
-  if(fitofinterest=="ME"){
-    fitofinterestlabel <- "Mean Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "ME"], na.rm=TRUE)
-  } else if(fitofinterest=="MAE"){
-    fitofinterestlabel <- "Mean Absolute Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "MAE"], na.rm=TRUE)
-  } else if(fitofinterest=="MSE"){
-    fitofinterestlabel <- "Mean Squared Error (AF^2)"
-    maxxlim <- 1.1*max(basinsc[, "MSE"], na.rm=TRUE)
-  } else if(fitofinterest=="RMSE"){
-    fitofinterestlabel <- "Root Mean Squared Error (AF)"
-    maxxlim <- 1.1*max(basinsc[, "RMSE"], na.rm=TRUE)
-  } else if(fitofinterest=="NRMSE.."){
-    fitofinterestlabel <- "Normalized Root Mean Squared Error (AF^2)"
-    maxxlim <- 1.1*max(basinsc[, "NRMSE.."], na.rm=TRUE)
-  } else if(fitofinterest=="PBIAS.."){
-    fitofinterestlabel <- "Percent Bias (-)"
-    maxxlim <- 1.4*max(basinsc[, "PBIAS.."], na.rm=TRUE)
-  } else if(fitofinterest=="RSR"){
-    fitofinterestlabel <- "RMSE to Standard Deviation of Observations Ratio (-)"
-    maxxlim <- 67
-  } else if(fitofinterest=="NSE"){
-    fitofinterestlabel <- "Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 500
-  } else if(fitofinterest=="rSD"){
-    fitofinterestlabel <- "Ratio of Standard Deviations (-)"
-    maxxlim <- 1.1*max(basinsc[, "rSD"], na.rm=TRUE)
-  } else if(fitofinterest=="mNSE"){
-    fitofinterestlabel <- "Modified Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 5
-  } else if(fitofinterest=="rNSE"){
-    fitofinterestlabel <- "Relative Nash-Sutcliffe Efficiency (-)"
-    maxxlim <- 5e5
-  } else if(fitofinterest=="d"){
-    fitofinterestlabel <- "Index of Agreement (-)"
-    maxxlim <- 1.05*max(basinsc[, "d"], na.rm=TRUE)
-  } else if(fitofinterest=="md"){
-    fitofinterestlabel <- "Modified Index of Agreement (-)"
-    maxxlim <- 1.1*max(basinsc[, "md"], na.rm=TRUE)
-  } else if(fitofinterest=="rd"){
-    fitofinterestlabel <- "Relative Index of Agreement (-)"
-    maxxlim <- 100
-  } else if(fitofinterest=="cp"){
-    fitofinterestlabel <- "Persistence Index (-)"
-    maxxlim <- 200
-  } else if(fitofinterest=="r"){
-    fitofinterestlabel <- "Pearson Correlation coefficient (-)"
-    maxxlim <- 1.1*max(basinsc[, "r"], na.rm=TRUE)
-  } else if(fitofinterest=="R2"){
-    fitofinterestlabel <- "Coefficient of Determination (-)"
-    maxxlim <- 1.0
-  } else if(fitofinterest=="bR2"){
-    fitofinterestlabel <- "Bias-Corrected Coefficient of Determination (-)"
-    maxxlim <- 1.0
-  } else if(fitofinterest=="KGE"){
-    fitofinterestlabel <- "Kling-Gupta Efficiency (-)"
-    maxxlim <- 10
-  } else if(fitofinterest=="VE"){
-    fitofinterestlabel <- "Volumetric Efficiency (AF)"
-    maxxlim <- 6
-  } else{
-    print("Input a measure of fit provided by the gof function in HydroGOF package!")
-  }
-  
-  plottoprint <- ggplot(basinsc, aes(x=GRPS, y=basinsc[,fitofinterest], fill=GRPS))+
-      geom_boxplot(outlier.shape=NA, alpha=0.3) +
-      geom_jitter(shape=16, position=position_jitter(0.1)) +
-      coord_flip() +
-      theme_bw(base_size = 8) +
-      ylab(fitofinterestlabel) +
-      xlab("Basin Hierarchy") +
-      scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
-      scale_color_manual(values=cbpblack[2:6]) +
-      theme(legend.position="none")
-  
-  png(paste0('ch2 data transformations/outputdata/rplot212_', fitofinterest, "gofboxplot_", modelform, "_", datatype, '.png'), width=6.5, height=1.8, units="in", pointsize=8, res=1200)
-    par(mar=c(0,0,0,0)+0.1, cex=1)
     print(plottoprint)
   dev.off()
 }
 
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "ME")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MAE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "MSE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RMSE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NRMSE..")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "PBIAS..")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "RSR")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rSD")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "NSE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "mNSE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rNSE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "d")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "md")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "rd")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "cp")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "r")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "R2")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "bR2")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "KGE")
-# gofboxplot(gof_lm_inc_by_basins, "inc", "lm", "VE")
+# gofdotchart(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "NSE")
+# gofdotchart(gof_lm_agg_by_basins, gof_lm_inc_by_basins, "bR2")
+# gofdotchart(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "NSE")
+# gofdotchart(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2")
+gofdotchart(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "NSE")
+gofdotchart(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2")
+```
 
-gofboxplot2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendpos){ 
+```{r boxplot}
+gofboxplot <- function(gof_results_agg, gof_results_inc, fitofinterest){ 
   basinsc <- basins_points
   results <- data.frame(t(gof_results_agg))
   results$CDEC_ID <- rownames(results)
@@ -3076,27 +2663,71 @@ gofboxplot2 <- function(gof_results_agg, gof_results_inc, fitofinterest, legendp
   }
   
   basinsc2 <- melt(basinsc[,c("CDEC_ID", "GRPS", paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y"))], id.vars = c("CDEC_ID", "GRPS"), measure.vars = c(paste0(fitofinterest, ".x"), paste0(fitofinterest, ".y")))
+  
   plottoprint <- ggplot(basinsc2, aes(x=GRPS, y=value, fill=variable))+
-      geom_boxplot(outlier.shape=NA, alpha=0.3, position=position_dodge(1)) +
-      geom_point(position=position_dodge(width=1), aes(group=variable, col=variable), show.legend=FALSE) +
+      geom_boxplot(outlier.shape=NA, alpha=0.3, position=position_dodge(1), show.legend = FALSE) +
+      geom_point(position=position_dodge(width=1), aes(group=variable, col=variable, shape=variable), size=2, alpha=0.7) +
       # geom_jitter(shape=16, position=position_jitter(0.1), aes(group=variable)) +
       coord_flip() +
-      theme_bw(base_size = 8) +
       ylab(fitofinterestlabel) +
       xlab("Basin Hierarchy") +
       scale_x_discrete(limits = rev(levels(basinsc$GRPS))) +
-      scale_color_manual(values=cbpblack[7:8]) +
-      theme(legend.title = element_blank(), legend.text=element_text(size=10), text=element_text(size=10)) +
-      scale_fill_discrete(labels=c("agg", "inc"))
-  
+      scale_color_manual(name="Type", labels=c("AGG", "INC"), values=cbpblack[7:8]) +
+      scale_fill_discrete(name="Type", labels=c("AGG", "INC")) +
+      scale_shape_manual(name="Type", labels=c("AGG", "INC"), values=c(8, 16)) +
+      theme_bw() +
+      theme(legend.title = element_blank(), legend.text=element_text(size=10), text=element_text(size=10)) 
+
   png(paste0('ch2 data transformations/outputdata/rplot212_', fitofinterest, "gofboxplot_comp.png"), width=6.5, height=4, units="in", pointsize=8, res=1200)
     par(mar=c(0,0,0,0)+0.1, cex=1)
     print(plottoprint)
   dev.off()
 }
 
-# gofboxplot2(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2", "topright")
-gofboxplot2(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2", "topright")
+# gofboxplot(gof_glm_agg_by_basins, gof_glm_inc_by_basins, "bR2")
+gofboxplot(gof_nn_agg_by_basins, gof_nn_inc_by_basins, "bR2")
+```
+
+```{r benchmarking_with_BCM}
+bcm_results <- read.csv("Inputdata/bcm_validation_results.csv")
+bcm_results <- bcm_results[, c("CDEC_ID", "BCM_NSE")]
+colnames(bcm_results)[2] <- "BCM"
+bcm_results <- na.omit(bcm_results)
+
+nn_bench_results1 <- data.frame(t(gof_nn_agg_by_basins["NSE", ]))
+nn_bench_results1$CDEC_ID <- rownames(nn_bench_results1)
+colnames(nn_bench_results1)[1] <- "NN AGG"
+
+nn_bench_results2 <- data.frame(t(gof_nn_inc_by_basins["NSE", ]))
+nn_bench_results2$CDEC_ID <- rownames(nn_bench_results2)
+colnames(nn_bench_results2)[1] <- "NN INC"
+
+nn_bench_results <- merge(bcm_results, nn_bench_results1, by="CDEC_ID")
+nn_bench_results <- merge(nn_bench_results, nn_bench_results2, by="CDEC_ID")
+
+nn_bench_results <- melt(nn_bench_results, id.vars = "CDEC_ID", measure.vars = c("BCM", "NN AGG", "NN INC"), variable.name="TYPE", value.name = "NSE")
+
+bench_h <- aggregate(HIERARCHY~CDEC_ID, data=results_all[ ,c("CDEC_ID", "HIERARCHY")], FUN=mean)
+nn_bench_results <- merge(nn_bench_results, bench_h, by="CDEC_ID")
+
+plottoprint <- ggplot(data=nn_bench_results, aes(x=NSE, y=CDEC_ID)) +
+  geom_point(aes(shape=TYPE, color=TYPE), size=2)+
+  facet_grid(HIERARCHY ~ ., scales = "free", space = "free") +
+  scale_shape_manual(breaks = c("BCM", "NN AGG", "NN INC"), values=c(17, 8, 16)) + 
+  scale_colour_manual(aesthetics = c("colour"), values=c(cbpblack[2], cbpblack[7], cbpblack[8]), breaks = c("BCM", "NN AGG", "NN INC")) +
+  labs(x="Nash-Sutcliffe Efficiency Factor (-)", y="")+
+  theme_bw()+
+  theme(legend.position="right", legend.title = element_blank())+
+  guides(color = guide_legend(nrow = 3), shape= guide_legend(nrow = 3))
+    
+png(paste0('ch2 data transformations/outputdata/rplot215_benchmarking.png'), width=6.5, height=3.2, units="in", pointsize=8, res=1200)
+  print(plottoprint)
+dev.off()
+
+png(paste0('ch2 data transformations/outputdata/rplot215_benchmarking2.png'), width=6.5, height=3.2, units="in", pointsize=8, res=1200)
+  plottoprint <- plottoprint + coord_cartesian(xlim=c(0, 1))
+  print(plottoprint)
+dev.off()
 ```
 
 # 9.0 Variable Importance Plots 
@@ -3130,23 +2761,23 @@ trainingdim <- dim(df_lm_agg[,c(15,18:(ncol(df_lm_agg)-1))])
 #   nnmodel %>% save_model_hdf5(paste0("ch2 data transformations/outputdata/vi_saved_mods/nn_hdf5/nn_", h, ".h5"))
 # }
 
-# LM
-linearmodel <- list()
-for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
-  h <- unique(df_lm_agg$CDEC_ID)[k]
-  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
-  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
-  linearmodel[[k]] <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
-}
+# # LM
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+#   trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+#   lmmodel <- lm(FLOW~., data=trainset[,c(15,18:ncol(trainset))])
+#   saveRDS(lmmodel, paste0("ch2 data transformations/outputdata/vi_saved_mods/lm_rds/lm_", h, ".rds"))
+# }
 
-# GLM
-glinearmodel <- list()
-for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
-  h <- unique(df_lm_agg$CDEC_ID)[k]
-  testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
-  trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
-  glinearmodel[[k]] <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
-}
+# # GLM
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
+#   trainset <- df_lm_agg[df_lm_agg$CDEC_ID!=h,]
+#   glmmodel <- glm(FLOW~., data=trainset[,c(15,18:ncol(trainset))], family=tweedie(var.power=1.1, link.power=0), maxit=1000)
+#   saveRDS(glmmodel, paste0("ch2 data transformations/outputdata/vi_saved_mods/glm_rds/glm_", h, ".rds"))
+# }
 
 # # RF
 # for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
@@ -3156,16 +2787,24 @@ for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
 #   rfmodel <- randomForest(FLOW~., data=trainset[,c(15,18:ncol(trainset))], mtry=20)
 #   saveRDS(rfmodel, paste0("ch2 data transformations/outputdata/vi_saved_mods/rf_rds/rf_", h, ".rds"))
 # }
+
+# read back in
+linearmodel <- glinearmodel <- rfmodel <- list()
+for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+  linearmodel[[k]] <- readRDS(paste0("ch2 data transformations/outputdata/vi_saved_mods/lm_rds/lm_", h, ".rds"))
+  glinearmodel[[k]] <- readRDS(paste0("ch2 data transformations/outputdata/vi_saved_mods/glm_rds/glm_", h, ".rds"))
+  rfmodel[[k]] <- readRDS(paste0("ch2 data transformations/outputdata/vi_saved_mods/rf_rds/rf_", h, ".rds"))
+}
 ```
 
-```{r vip}
+```{r vip} 
 library(vip)
 library(ggplot2)
 
 ## NN
 pred_wrapper <- function(object, newdata) {
   predict(object, x = as.matrix(newdata)) %>%
-    as.vector()
+  as.vector()
 }
 
 nnvip <- list()
@@ -3299,7 +2938,7 @@ for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
 # }
 ```
 
-```{r vip_averages}
+```{r vip_averages} 
 vimeans <- function(model, ...){
   vils <- list()
   for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
@@ -3338,14 +2977,21 @@ vi_means <- rbind(lmvi_mean, glmvi_mean, rfvi_mean, nnvi_mean)
 vi_means$Variable <- factor(vi_means$Variable, levels = nnvi_mean$Variable[order(nnvi_mean$Importance, decreasing=FALSE)])
 vi_means$MODELTYPE <- factor(vi_means$MODELTYPE, levels=c("LM", "GLM", "RF", "NN"))
 
-png("ch2 data transformations/outputdata/rplot213_vip_means.png", width=6.5, height=8, units="in", pointsize=8, res=1200)
+MODELTYPE_labels <- c("LM", "GLM", "RF", "NN")
+names(MODELTYPE_labels) <- c("LM", "GLM", "RF", "NN")
+var_labels <- c("Date","Basin ID", "Basin Name", "River Basin", "County", "Operator", "Station Above #1", "Station Above #2", "Station Above #3", "Station Above #4", "Hierarchy", "Lon", "Lat", "Month", "Ordinal Month", "Season", "Year", "Water Year", "Temperature", "Tmp Lag 1m", "Tmp Lag 2m", "Tmp Lag 3m", "Precipitation", "Ppt Lag 1m", "Ppt Lag 2m", "Ppt Lag 3m", "Snow", "Drainage Area", "Shape", "Compactness", "Mean Elevation", "Relief Ratio", "Sat. Hyd. Conductivity", "% Silt", "% Sand", "% Clay", "Avail. Water Cont.", "Lambda Pore Size", "N Pore Size", "Depth to Restricted Layer", "Percent Vegetated", "Unimpaired Flow" )
+names(var_labels) <- c("DATE", "CDEC_ID", "STATION_NAME", "RIVER_BASIN", "COUNTY", "OPERATOR", "STATIONS_ABOVE1",  "STATIONS_ABOVE2", "STATIONS_ABOVE3", "STATIONS_ABOVE4", "HIERARCHY", "LONGITUDE", "LATITUDE", "MONTH", "MONTH_ORDINAL", "SEASON", "YEAR", "WATERYEAR", "TMP", "TMPLAG1", "TMPLAG2", "TMPLAG3", "PPT", "PPTLAG1", "PPTLAG2", "PPTLAG3", "SNOW", "AREASQM", "SHAPE", "COMPACTNESS", "MEANELEV", "BASINRELIEFRATIO","KSAT", "SILT", "SAND", "CLAY", "AWC", "LAMBDA", "N", "RESDT", "VEGETATED", "FLOW")
+
+png("ch2 data transformations/outputdata/rplot213_vip_means.png", width=6.5, height=4, units="in", pointsize=8, res=1200)
   ggplot(data=vi_means, aes(x=Importance, y=Variable, group=MODELTYPE)) +
-    geom_point(aes(shape=MODELTYPE, color=MODELTYPE), size=4)+
-    scale_color_manual(values=cbpblack[c(2, 3, 6, 1)])+
-    scale_shape_manual(values=c(3, 17, 0, 16))+
+    geom_point(aes(shape=MODELTYPE, color=MODELTYPE), size=2)+
+    scale_color_manual(values=cbpblack[c(2, 3, 5, 6)], labels=MODELTYPE_labels)+
+    scale_shape_manual(values=c(3, 17, 0, 16), labels=MODELTYPE_labels)+
+    scale_y_discrete(labels=var_labels)+
     labs(x="Importance (scaled)", y="")+
-    theme_bw()+
-    theme(legend.position="bottom", legend.title = element_blank())
+    guides(shape = guide_legend(nrow = 1))+
+    theme_bw(base_size = 8)+
+    theme(legend.position="right", legend.title = element_blank()) 
 dev.off()
 ```
 
@@ -3354,14 +3000,13 @@ dev.off()
 library(pdp)
 pdp_AREASQM <- pdp_PPT <- list()
 nnmodel <- list()
-
 pdp_wrapper <- function(object, newdata) {
   predict(object, x = as.matrix(newdata)) %>%
     as.vector() %>%
     mean()  # aggregate ICE curves
 }
-pdp_AREASQM_PPT <- pdp_MONTH <- list()
 
+pdp_AREASQM_PPT <- pdp_MONTH <- list()
 for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
   h <- unique(df_lm_agg$CDEC_ID)[k]
   testset <- df_lm_agg[df_lm_agg$CDEC_ID==h,]
@@ -3377,65 +3022,148 @@ for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
   # pdp_AREASQM[[k]] <- partial(nnmodel[[k]], pred.var = "AREASQM", pred.fun = pred_wrapper, train = as.data.frame(trainsetpvs))
   # pdp_PPT[[k]] <- partial(nnmodel[[k]], pred.var = "PPT", pred.fun = pred_wrapper, train = as.data.frame(trainsetpvs))
   # pdp_AREASQM_PPT[[k]] <- partial(nnmodel[[k]], pred.var = c("AREASQM", "PPT"), chull = TRUE, pred.fun = pdp_wrapper, train = as.data.frame(trainsetpvs))
-  pdp_MONTH[[k]] <- partial(nnmodel[[k]], pred.var = "MONTH_ORDINAL", chull = TRUE, pred.fun = pdp_wrapper, train = as.data.frame(trainsetpvs))
+  # pdp_MONTH[[k]] <- partial(nnmodel[[k]], pred.var = "MONTH_ORDINAL", chull = TRUE, pred.fun = pdp_wrapper, train = as.data.frame(trainsetpvs))
 }
 # 
 ## took too long to run, especially the joint partial dependence so save and read back in
 # saveRDS(pdp_AREASQM, "ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM.RDS")
 # saveRDS(pdp_PPT, "ch2 data transformations/outputdata/pd_saved/nn_pdp_PPT.RDS")
 # saveRDS(pdp_AREASQM_PPT, "ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM_PPT.RDS")
-saveRDS(pdp_MONTH, "ch2 data transformations/outputdata/pd_saved/nn_pdp_MONTH.RDS")
+# saveRDS(pdp_MONTH, "ch2 data transformations/outputdata/pd_saved/nn_pdp_MONTH.RDS")
 
 pdp_AREASQM <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM.RDS")
 pdp_PPT <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_PPT.RDS")
 pdp_AREASQM_PPT <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_AREASQM_PPT.RDS")
 pdp_MONTH <- readRDS("ch2 data transformations/outputdata/pd_saved/nn_pdp_MONTH.RDS")
 
-for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){ # randomly sampled because it was taking too long to plot
-  h <- unique(df_lm_agg$CDEC_ID)[k]
-  # p1 <- pdp_AREASQM[[k]][sample(nrow(pdp_AREASQM[[k]]), 50000),]  %>% autoplot(alpha = 0.1) + 
-  #   labs(x="Drainage Area (km^2)", y="Predicted Unimpaired Flow (AF)") +
-  #   theme_bw()
-  # p2 <- pdp_PPT[[k]][sample(nrow(pdp_PPT[[k]]), 50000),] %>% autoplot(alpha = 0.1) + 
-  #   labs(x="Precipitation (mm)", y="Predicted Unimpaired Flow (AF)") +
-  #   theme_bw()
-  # p3 <-  pdp_AREASQM_PPT[[k]] %>% autoplot() + 
-  #   labs(x="Drainage Area (km^2)", y="Precipitation (mm)") +
-  #   guides(fill=guide_legend(title="Predicted \nUnimpaired \nFlow (AF)"))
-  #   theme_bw()
-  p4 <-  pdp_MONTH[[k]] %>% autoplot(alpha = 0.1) + 
-    labs(x="Ordinal Month (km^2)", y="Predicted Unimpaired Flow (AF)") +
-    theme_bw()
-  
-  # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp1_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
-  #   grid.arrange(p1, p2, ncol = 2)+
-  #     theme_bw()
-  # dev.off()
-  # 
-  # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp2_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
-  #   print(p3)
-  # dev.off()
-  
-  png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp3_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
-    print(p4)
-  dev.off()
+# # randomly sampled because it was taking too long to plot
+# for(k in 1:(length(unique(df_lm_agg$CDEC_ID)))){
+#   h <- unique(df_lm_agg$CDEC_ID)[k]
+#   # p1 <- pdp_AREASQM[[k]][sample(nrow(pdp_AREASQM[[k]]), 50000),]  %>% autoplot(alpha = 0.1) + 
+#   #   labs(x="Drainage Area (km^2)", y="Predicted Unimpaired Flow (AF)") +
+#   #   theme_bw()
+#   # p2 <- pdp_PPT[[k]][sample(nrow(pdp_PPT[[k]]), 50000),] %>% autoplot(alpha = 0.1) + 
+#   #   labs(x="Precipitation (mm)", y="Predicted Unimpaired Flow (AF)") +
+#   #   theme_bw()
+#   # p3 <-  pdp_AREASQM_PPT[[k]] %>% autoplot() + 
+#   #   labs(x="Drainage Area (km^2)", y="Precipitation (mm)") +
+#   #   guides(fill=guide_legend(title="Predicted \nUnimpaired \nFlow (AF)"))
+#   #   theme_bw()
+#   p4 <-  ggplot(pdp_MONTH[[k]], aes(x=MONTH_ORDINAL, y=yhat))+
+#       geom_point()+
+#       labs(x="Ordinal Month (Distance From June)", y="Predicted Unimpaired Flow (AF/m)")+
+#       theme_bw()
+#   
+#   # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp1_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+#   #   grid.arrange(p1, p2, ncol = 2)+
+#   #     theme_bw()
+#   # dev.off()
+#   # 
+#   # png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp2_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+#   #   print(p3)
+#   # dev.off()
+#   #
+#   png(paste0("ch2 data transformations/outputdata/pdp/nn/pdp3_testset_",h, ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+#     print(p4)
+#   dev.off()
+# }
+
+# # to customize 
+# print(pdp_AREASQM[[1]][sample(nrow(pdp_AREASQM[[1]]), 5000),] 
+#       %>% autoplot(alpha = 0.1)) +
+#       labs(x="Drainage Area (SQM)", y="Predicted Unimpaired Flow (AF/m)")+
+#       theme_bw()
+# 
+# print(pdp_PPT[[1]][sample(nrow(pdp_PPT[[1]]), 5000),] 
+#       %>% autoplot(alpha = 0.1)) +
+#       labs(x="Precipitation (mm)", y="Predicted Unimpaired Flow (AF/m)")+
+#       theme_bw()
+# 
+# print(pdp_MONTH[[1]] 
+#       %>% autoplot(alpha = 1)) +
+#       labs(x="Ordinal Month (distance from June)", y="Predicted Unimpaired Flow (AF/m)")+
+#       theme_bw()
+# 
+# ggplot(pdp_MONTH[[1]], aes(x=MONTH_ORDINAL, y=yhat))+
+#   geom_point()+
+#   labs(x="Ordinal Month (Distance From June)", y="Predicted Unimpaired Flow (AF/m)")+
+#   theme_bw()
+
+# for all predictor variables but for one basin, let's go with AMF (k=2)
+testset <- df_lm_agg[df_lm_agg$CDEC_ID=="AMF",]
+trainset <- df_lm_agg[df_lm_agg$CDEC_ID!="AMF",]
+testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+testsetrv <- as.matrix(testset$FLOW)
+trainsetrv <- as.matrix(trainset$FLOW)
+
+p_vars <- colnames(trainset)[c(15,18:(ncol(trainset)-1))]
+var_labels <- c("Date","Basin ID", "Basin Name", "River Basin", "County", "Operator", "Station Above #1", "Station Above #2", "Station Above #3", "Station Above #4", "Hierarchy", "Lon", "Lat", "Month", "Ordinal Month (Distance from June)", "Season", "Year", "Water Year", "Temperature (Deg C)", "Temperature Lag 1m (Deg C)", "Temperature Lag 2m (Deg C)", "Temperature Lag 3m (Deg C)", "Precipitation (mm)", "Precipitation Lag 1m (mm)", "Precipitation Lag 2m (mm)", "Precipitation Lag 3m (mm)", "Snow (mm)", "Drainage Area (SQM)", "Shape (m/m)", "Compactness (m^2/m^2)", "Mean Elevation (m)", "Relief Ratio (m/m)", "Sat. Hyd. Conductivity (cm/hr)", "% Silt (%)", "% Sand (%)", "% Clay (%)", "Available Water Content (m^3/m^3)", "Lambda, Pore Size Distribution Index", "N, Pore Size Distribution", "Depth to Restricted Layer (cm)", "Percent Vegetated (%)", "Unimpaired Flow (AF/m)" )
+names(var_labels) <- c("DATE", "CDEC_ID", "STATION_NAME", "RIVER_BASIN", "COUNTY", "OPERATOR", "STATIONS_ABOVE1",  "STATIONS_ABOVE2", "STATIONS_ABOVE3", "STATIONS_ABOVE4", "HIERARCHY", "LONGITUDE", "LATITUDE", "MONTH", "MONTH_ORDINAL", "SEASON", "YEAR", "WATERYEAR", "TMP", "TMPLAG1", "TMPLAG2", "TMPLAG3", "PPT", "PPTLAG1", "PPTLAG2", "PPTLAG3", "SNOW", "AREASQM", "SHAPE", "COMPACTNESS", "MEANELEV", "BASINRELIEFRATIO","KSAT", "SILT", "SAND", "CLAY", "AWC", "LAMBDA", "N", "RESDT", "VEGETATED", "FLOW")
+
+# # for AMF
+# ice <- list()
+# for (i in 1:length(p_vars)){
+#   ice[[i]] <- partial(nnmodel[[2]], pred.var=p_vars[i], pred.fun=pred_wrapper, train=as.data.frame(trainsetpvs), ice=TRUE, nsim=100)
+# }
+# 
+# for (i in 1:length(p_vars)){
+#   plottoprint <- autoplot(ice[[i]], alpha = 0.05) + # ice[sample(nrow(ice), 50000), ]
+#     labs(x=var_labels[which(names(var_labels)==p_vars[i])], y="Pred. Unimpaired Flow (AF/m)")+
+#     theme_bw()
+#   png(paste0("ch2 data transformations/outputdata/pdp/nn_AMF/pdp_", p_vars[i], ".png"), width=6.5, height=3, units="in", pointsize=8, res=1200)
+#     print(plottoprint)
+#   dev.off()
+# }
+
+# # for YRS
+# ice <- list()
+# for (i in 1:length(p_vars)){
+#   ice[[i]] <- partial(nnmodel[[67]], pred.var=p_vars[i], pred.fun=pred_wrapper, train=as.data.frame(trainsetpvs), ice=TRUE, nsim=100)
+# }
+# 
+# for (i in 1:length(p_vars)){
+#   plottoprint <- autoplot(ice[[i]], alpha = 0.05) + # ice[sample(nrow(ice), 50000), ]
+#     labs(x=var_labels[which(names(var_labels)==p_vars[i])], y="Predicted Unimpaired Flow (AF/m)")+
+#     theme_bw()
+#   png(paste0("ch2 data transformations/outputdata/pdp/nn_YRS/pdp_", p_vars[i], ".png"), width=6.5/2, height=2.25, units="in", pointsize=8, res=1200)
+#     print(plottoprint)
+#   dev.off()
+# }
+
+# plot for paper
+# "AREASQM"   12
+# "MEANELEV"  15
+# "PPT"       7 
+# "TMP"       3
+# "SNOW"      11
+# "SAND"      19
+
+# make a long format data with the variables above
+vars_of_interest <- c(12, 15, 7, 3, 11, 19)
+for (i in vars_of_interest){
+  ice[[i]]$VAR <- colnames(ice[[i]])[1]
+  colnames(ice[[i]]) <- c("VALUE", "PRED", "ID", "VAR")
 }
 
-# to customize 
-print(pdp_AREASQM[[1]][sample(nrow(pdp_AREASQM[[1]]), 50000),] 
-      %>% autoplot(alpha = 0.1))
-      
-      +
-      labs(x="Drainage Area (km^2)", y="Precipitation (mm)")+
-      theme_bw()+
-      guides(fill=guide_legend(title="Predicted \nUnimpaired \nFlow (AF)"))
-      
-      )
+ice_YRS <- rbind(ice[[12]], ice[[15]], ice[[7]], ice[[3]], ice[[11]], ice[[19]])
+ice_YRS$VAR <- factor(ice_YRS$VAR, levels=c("AREASQM", "PPT", "TMP", "SNOW", "MEANELEV", "SAND"))
+pretty_facet_labels <- var_labels[c(28, 31, 23, 19, 27, 35)]
 
+library(ggpmisc)
+png('ch2 data transformations/outputdata/rplot214_pdp.png', width=6.5, height=8, units="in", pointsize=8, res=1200)
+  plottoprint <- ggplot(ice_YRS, aes(x=VALUE, y=PRED)) +
+    geom_line(aes(group=ice_YRS$ID), alpha = 0.05) +
+    facet_wrap(~VAR, ncol=2, scales = "free_x", strip.position = "top", labeller=labeller(VAR=pretty_facet_labels))+
+    labs(x="", y = "Predicted Unimpaired Flow (AF/m)", color = "")+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    stat_summary(fun.y = mean, geom = "line", col=cbpblack[8])+
+    theme_bw(base_size = 8)
+  print(plottoprint)
+dev.off()
 ```
 
 Find out how different the PDP and the VIP plots are between nn that preforms well and the other models. Leo Brieman, in two cultures, argues that if a model isn't a good predictor, then it may produce erroneous conclusions about the underlying mechanism that produced the data. Let's see how different that really is. maybe compare across the 10 basins that overlap with the BCM so it doesn't become too hard to compare. 
-
 
 # 11.0 Variable Interactions
 ```{r interactions}

@@ -1,0 +1,1408 @@
+---
+title: "dataprep"
+author: "Ellie White"
+date: "February 22, 2019"
+output: html_document
+---
+
+A record for data processing before we hand it over to the machine learning algorithm. 
+
+# Contents   
+1.0 Data Gathering  
+    Basin Boundaries -- Developed from NHDPlusV2
+    Climate (Dynamic) -- PRISM  
+    Basin Geometry
+    Hypsometry -- SRTM
+    Soil Properties -- POLARIS  
+    Land Cover -- CALVEG
+    Geology -- NRCS 
+    Unimpaired Flows -- CDEC  
+    Month, Season and Year
+2.0 Data Prep for modelling       
+ 
+# Libraries  
+library(raster)         # for raster data manipulation  
+library(rgeos)          # for spatial data calculations  
+library(rgdal)          # for spatial data manipulation 
+library(dismo)          # for spatial data calculations
+library(geosphere)      # for spatial data calculations
+library(prism)          # for temp and precip data  
+library(sharpshootR)    # for CDEC web scraping    
+library(reshape2)       # for reshaping data  
+  
+```{r, include=FALSE}
+library(knitr)
+library(formatR)
+opts_chunk$set(
+  fig.width  = 7.5,
+  fig.height = 7.5,
+  collapse   = TRUE,
+  tidy       = FALSE
+)
+```
+
+# Citations
+```{r citations}
+# cite R 
+toBibtex(citation())
+
+# cite packages
+citethese <- c("raster", "rgdal", "rgeos", "dismo", "geosphere", "prism", "sharpshootR", "reshape2")
+for(i in seq_along(citethese)){
+  x <- citation(citethese[i])
+  print(toBibtex(x))
+}
+
+sessionInfo()
+RStudio.Version()
+```
+
+# 1.0 Basin Boundaries -- Developed from NHDPlusV2
+What: CDEC basin boundaries developed by joinging all HUC14 (?), or small, basins above the outlet point. All processing was done in ArcGIS with the NHDPlusV2 data (i.e., flow direction, small basin boundaries, ...). 
+Type (extension): one .shp file that contains all .shp boundaries
+
+### 1.1 Aggregate Basins
+```{r basin_data}
+library(raster)
+# CDEC Basin location, replace when you have SFJ and OTR data
+sptdf <- df <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/cdec_fnf_stations_data_minus_sfj_otr_bhn_ftm_sfr_sjm_klo.csv", header=TRUE, stringsAsFactors=FALSE, fileEncoding="latin1")
+
+# keep df as a normal DataFrame for later use, and make spdf a SpatialPolygonsDataFrame
+coordinates(sptdf) <- ~LONGITUDE + LATITUDE
+proj4string(sptdf) <- CRS('+proj=longlat +datum=WGS84')
+
+library(rgdal)
+basins <- shapefile('D:/ml with cdec uf/Input Data/CDEC_FNF/catchment_all.shp')
+
+# YBJ, YBM basin outlets are the same but the data is different, axe YBJ and keep YBM becasue Tariq et. al. said YBM+USGS gauge is YBJ. So YBM is the unimpaired
+# YBJ: INFL JACKSON MDWS & BOWMAN
+# YBM: YUBA MF NR JACKSON MDWS
+basins <- basins[basins@data$STATION!="YBJ",]
+
+# remove SFJ and OTR until you get the data
+basins <- basins[basins@data$STATION!="SFJ",]
+basins <- basins[basins@data$STATION!="OTR",]
+
+# remove the BHN, FTM, SFR, SJM data because these stations were discontinued and the times they were in operation do not overlap with the other basins
+basins <- basins[basins@data$STATION!="BHN",]
+basins <- basins[basins@data$STATION!="FTM",]
+basins <- basins[basins@data$STATION!="SFR",]
+basins <- basins[basins@data$STATION!="SJM",]
+
+# projections used for California
+tealalbers <- crs("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=km +ellps=GRS80")
+albers <- crs("+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=23 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0")
+
+# transform to all to Albers
+sptdf <- spTransform(sptdf, albers)
+basins <- spTransform(basins, albers)
+
+# join the information on the stations to the SpatialPolygonsDataFrame
+basins@data <- merge(basins@data, sptdf, by.x= "STATION", by.y="CDEC_ID")
+```
+
+### 1.2 Incremental Basins 
+cluster 1
+* SRS + KLO_INC = KLO !!! SFJ data is not available 
+
+cluster 2
+* PLK + PSH_INC = PSH 
+* SQS + PSH + SIS_INC = SIS
+* SDT + MSS + SIS + SBB_INC = SBB
+
+cluster 3
+* FPR + ANT + FPL_INC = FPL
+* FRD + DAV + FTC_INC = FTC
+* FTC +  FTM_INC = FTM
+* FPL + FTM + FTP + FTO_INC = FTO
+
+cluster 4
+* YBG + YBM + YCB + YBS + YRS_INC = YRS
+
+cluster 5 
+* MKW + MKM_INC = MKM
+
+cluster 6 
+* STB + SNS_INC = SNS
+
+cluster 7 
+* TLM + TLN + TLG_INC = TLG
+
+cluster 8 
+* AMN + AMA_INC = AMA
+* ASV + SCU + SVC_INC = SVC
+* AMA + SVC + AMK + AMF_INC = AMF
+                                                       
+cluster 9 
+* LNV + OWL_INC = OWL
+* OWL + THT + OTR_INC = OTR !!!! Don't have OTR data though
+
+cluster 10 
+* KRK + KRI + KRB_INC = KRB
+
+cluster 11
+* SSP + SWH_INC = SWH
+
+cluster 12
+* KGC+ KGP_INC = KGP
+* KGP + KGF_INC = KGF
+
+cluster 13
+* MDP + MRC_INC = MRC
+
+cluster 14
+* SFR + SJM_INC = SJM
+* SJM +  BHN + SJF_INC = SJF
+
+non clusters 
+* AMN, ASP, WWR, EWR, MBS, CYO, ASS, NCD, CSN, KWT, SCC, ERS, WFC, TRF
+```{r basins_incremental}
+# erase and subtract functions weren't working, so used gDifference, and had to retain the @data ttributes myself
+library(rgeos)
+basins_inc <- basins
+for(b in basins$STATION){
+  basinabove1 <- basins@data[basins$STATION == b, "STATIONS_ABOVE1"]
+  basinabove2 <- basins@data[basins$STATION == b, "STATIONS_ABOVE2"]
+  basinabove3 <- basins@data[basins$STATION == b, "STATIONS_ABOVE3"]
+  basinabove4 <- basins@data[basins$STATION == b, "STATIONS_ABOVE4"]
+  if(basinabove1!="none"){
+    b_inc <- gDifference(basins_inc[basins_inc$STATION == b, ],  basins_inc[basins_inc$STATION == basinabove1, ])
+    # retain the attributes becasue we will need to rbind
+    poly_df <- basins_inc[basins_inc$STATION == b, ]@data
+    row.names(poly_df) <- 1
+    b_inc <- SpatialPolygonsDataFrame(b_inc, poly_df)
+    if(basinabove2!="none"){
+      b_inc <- gDifference(b_inc, basins_inc[basins_inc$STATION == basinabove2, ])
+      poly_df <- basins_inc[basins_inc$STATION == b, ]@data
+      row.names(poly_df) <- 1
+      b_inc <- SpatialPolygonsDataFrame(b_inc, poly_df)
+      if(basinabove3!="none"){
+        b_inc <- gDifference(b_inc, basins_inc[basins_inc$STATION == basinabove3, ])
+        poly_df <- basins_inc[basins_inc$STATION == b, ]@data
+        row.names(poly_df) <- 1
+        b_inc <- SpatialPolygonsDataFrame(b_inc, poly_df)
+        if(basinabove4!="none"){
+          b_inc <- gDifference(b_inc, basins_inc[basins_inc$STATION == basinabove4, ])
+          poly_df <- basins_inc[basins_inc$STATION == b, ]@data
+          row.names(poly_df) <- 1
+          b_inc <- SpatialPolygonsDataFrame(b_inc, poly_df)
+          } else{b_inc} 
+        } else{b_inc} 
+     } else{b_inc}
+  } else{b_inc <- basins_inc[basins_inc$STATION == b, ]}
+  b_inc@data$STATION <- paste0(b,"_INC")
+  basins_inc <- rbind(basins_inc, b_inc)
+} 
+
+# remove the unnecessary variables created in the loop above 
+remove(basinabove1)
+remove(basinabove2)
+remove(basinabove3)
+remove(b_inc)
+remove(b)
+remove(poly_df)
+
+# # check the code with some plots
+# plot(basins_inc[basins_inc$STATION == "AMA_INC", ])
+# plot(basins_inc[basins_inc$STATION == "SBB_INC", ])
+# plot(basins_inc[basins_inc$STATION == "FRD_INC", ])
+# plot(basins_inc[basins_inc$STATION == "FTO_INC", ])
+
+# add the "###_INC" basins to the df dataframe too
+df <- rbind(df, df)
+df$CDEC_ID <- basins_inc@data$STATION
+```
+
+# 2.0 CEC Data: Historical
+
+## 2.1 Bring In the Data
+follow the links
+https://api.cal-adapt.org/api/
+https://api.cal-adapt.org/api/datasets/
+http://albers.cnr.berkeley.edu/data/scripps/livneh_vic-output/
+reference: "Pierce et al. (2018). Climate, drought, and sea level rise scenarios for California's fourth climate change assessment. California’s Fourth Climate Change Assessment, California Energy Commission. Publication Number: CNRA-CEC-2018-006."
+"url": "https://www.energy.ca.gov/sites/default/files/2019-07/Projections_CCCA4-CEC-2018-006.pdf",
+```{r cec_precip}
+library(raster)
+
+# example raster
+prast1992 <- raster("D:/ml with cdec uf/Input Data/CEC/observed_data/CA_NV/precip/precip.1992.v0.CA_NV.nc")
+
+# clip all rasters to this extent
+ex <- extent(prast1992)
+time <- 1915:2015
+pnew <- list()
+
+for (i in seq_along(time)){
+  rnew <- raster(paste0("D:/ml with cdec uf/Input Data/CEC/observed_data/CA_NV/precip/precip.", time[[i]], ".v0.CA_NV.nc"))
+  pnew[i] <- crop(rnew, ex)
+}
+
+# make a stack from 1915-2015
+pstack <- do.call(stack, pnew)
+# writeRaster(pstack,"Intermediary data/precip_hist.tif", format="GTiff", overwrite=TRUE)
+
+# crs(pstack)
+# yres(pstack)
+# xres(pstack)
+# nlayers(pstack) # has to be the 101 years of record we have
+# plot(pstack[[1:25]])
+# 
+# library(rasterVis)
+# levelplot(pstack[[1:10]])
+```
+
+```{r cec_airtemp}
+# 2008 is not working, went to cal-adapt API and downloaded that one file from: http://albers.cnr.berkeley.edu/data/scripps/livneh_vic-output/
+
+# example raster
+trast1992 <- raster("D:/ml with cdec uf/Input Data/CEC/observed_data/CA_NV/Tair/Tair.1992.v0.CA_NV.nc")
+
+# clip all rasters to this extent
+ex <- extent(trast1992)
+time <- 1915:2015
+tnew <- list()
+
+for (i in seq_along(time)){
+  rnew <- raster(paste0("D:/ml with cdec uf/Input Data/CEC/observed_data/CA_NV/Tair/Tair.", time[[i]], ".v0.CA_NV.nc"))
+  tnew[i] <- crop(rnew, ex)
+}
+
+# make a stack from 1915-2015
+tstack <- do.call(stack, tnew)
+# writeRaster(pstack,"Intermediary data/precip_hist.tif", format="GTiff", overwrite=TRUE)
+
+# crs(tstack)
+# yres(tstack)
+# xres(tstack)
+# nlayers(tstack) # has to be the 101 years of record we have
+# plot(tstack[[1:25]])
+# 
+# levelplot(tstack[[1:10]])
+```
+
+# 3.0 CEC Data: Climate Changed
+4 priority models (HadGEM2-ES, CNRM-CM5, CanESM2, MIROC5). Do we want to use these?
+10 models selected by California’s Climate Action Team Research Working Group as having a good simulation of California's historical climate.
+
+## 3.1 Bring In the Data
+```{r cc_precip_annual}
+# ccmodes recommended by D. Pierce for California
+ccmods <- c("CanESM2", "CNRM-CM5", "HadGEM2-ES", "MIROC5")
+
+# example
+prast2030 <- raster("D:/ml with cdec uf/Input Data/CEC/projected_data/CanESM2/rcp85/precip/precip.2030.v0.CA_NV.nc")
+
+vstackf <- function(ccmods, ccscenario, varofinterest){
+  ex <- extent(prast2030)
+  time <- 2015:2099
+  vnew <- list()
+  for(t in seq_along(time)){
+    rnew <- raster(paste0("D:/ml with cdec uf/Input Data/CEC/projected_data/", ccmods, "/", ccscenario, "/", varofinterest, "/", varofinterest, ".", time[[t]], ".v0.CA_NV.nc"))
+    vnew[t] <- crop(rnew, ex) 
+  }
+  vstackcc <- do.call(stack, vnew)
+}
+  
+# pstack_CanESM2_85 <- vstackf(ccmods[1], "rcp85", "precip")
+# pstack_CNRMCM5_85 <- vstackf(ccmods[2], "rcp85", "precip")
+# pstack_HadGEM2ES_85 <- vstackf(ccmods[3], "rcp85", "precip")
+# pstack_MIROC5_85 <- vstackf(ccmods[4], "rcp85", "precip")
+# 
+# pstack_CanESM2_45 <- vstackf(ccmods[1], "rcp45", "precip")
+# pstack_CNRMCM5_45 <- vstackf(ccmods[2], "rcp45", "precip")
+# pstack_HadGEM2ES_45 <- vstackf(ccmods[3], "rcp45", "precip")
+# pstack_MIROC5_45 <- vstackf(ccmods[4], "rcp45", "precip")
+```
+
+```{r cc_airtemp_annual}
+# tstack_CanESM2_85 <- vstackf(ccmods[1], "rcp85", "Tair")
+# tstack_CNRMCM5_85 <- vstackf(ccmods[2], "rcp85", "Tair")
+# tstack_HadGEM2ES_85 <- vstackf(ccmods[3], "rcp85", "Tair")
+# tstack_MIROC5_85 <- vstackf(ccmods[4], "rcp85", "Tair")
+# 
+# tstack_CanESM2_45 <- vstackf(ccmods[1], "rcp45", "Tair")
+# tstack_CNRMCM5_45 <- vstackf(ccmods[2], "rcp45", "Tair")
+# tstack_HadGEM2ES_45 <- vstackf(ccmods[3], "rcp45", "Tair")
+# tstack_MIROC5_45 <- vstackf(ccmods[4], "rcp45", "Tair")
+```
+
+```{r cc_getdata_monthly}
+# get monthly data downloaded
+library(RCurl)
+
+# ccmodes recommended by D. Pierce for California
+ccmods <- c("CanESM2", "CNRM-CM5", "HadGEM2-ES", "MIROC5")
+ccscenario <- c("rcp45", "rcp85")
+varofinterest <- c("rainfall", "Tair", "runoff")
+time <- 2006:2099
+month <- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+
+# for(c in seq_along(ccmods)){
+#   for(v in seq_along(varofinterest)){
+#     for(t in seq_along(time)){
+#       for(m in seq_along(month)){
+#         for(s in seq_along(ccscenario)){
+#           if(ccscenario[s]=="rcp85"){
+#             if(varofinterest[v]=="Tair"){
+#               if(ccmods[c]== "CanESM2"){
+#               numfolder <- 30769
+#               } else if (ccmods[c]== "CNRM-CM5"){
+#               numfolder <- 30853
+#               } else if (ccmods[c]== "GFDL-CM3"){
+#               numfolder <- 30874
+#               } else if (ccmods[c]== "HadGEM2-ES"){
+#               numfolder <- 30916
+#               } else if (ccmods[c]== "MIROC5"){
+#               numfolder <- 30937
+#               } else print("Enter a valid model!")
+#             } else if (varofinterest[v]=="rainfall"){
+#               if (ccmods[c]== "CanESM2"){
+#               numfolder <- 30754
+#               } else if (ccmods[c]== "CNRM-CM5"){
+#               numfolder <- 30838
+#               } else if (ccmods[c]== "GFDL-CM3"){
+#               numfolder <- 30859
+#               } else if (ccmods[c]== "HadGEM2-ES"){
+#               numfolder <- 30901
+#               } else if (ccmods[c]== "MIROC5"){
+#               numfolder <- 30922
+#               } else print("Enter a valid model!")
+#             } else if (varofinterest[v]=="runoff"){
+#               if (ccmods[c]== "CanESM2"){
+#               numfolder <- 30757
+#               } else if (ccmods[c]== "CNRM-CM5"){
+#               numfolder <- 30841
+#               } else if (ccmods[c]== "GFDL-CM3"){
+#               numfolder <- 30862
+#               } else if (ccmods[c]== "HadGEM2-ES"){
+#               numfolder <- 30904
+#               } else if (ccmods[c]== "MIROC5"){
+#               numfolder <- 30925
+#               } else print("Enter a valid model!")
+#             } else print("variables not defined!")
+#           } else if(ccscenario[s]=="rcp45"){
+#               if(varofinterest[v]=="Tair"){
+#                 if(ccmods[c]== "CanESM2"){
+#                 numfolder <- 30768
+#                 } else if (ccmods[c]== "CNRM-CM5"){
+#                 numfolder <- 30852
+#                 } else if (ccmods[c]== "GFDL-CM3"){
+#                 numfolder <- 30873
+#                 } else if (ccmods[c]== "HadGEM2-ES"){
+#                 numfolder <- 30915
+#                 } else if (ccmods[c]== "MIROC5"){
+#                 numfolder <- 30936
+#                 } else print("Enter a valid model!")
+#               } else if (varofinterest[v]=="rainfall"){
+#                 if (ccmods[c]== "CanESM2"){
+#                 numfolder <- 30753
+#                 } else if (ccmods[c]== "CNRM-CM5"){
+#                 numfolder <- 30837
+#                 } else if (ccmods[c]== "GFDL-CM3"){
+#                 numfolder <- 30858
+#                 } else if (ccmods[c]== "HadGEM2-ES"){
+#                 numfolder <- 30900
+#                 } else if (ccmods[c]== "MIROC5"){
+#                 numfolder <- 30921
+#                 } else print("Enter a valid model!")
+#               } else if (varofinterest[v]=="runoff"){
+#                 if (ccmods[c]== "CanESM2"){
+#                 numfolder <- 30756
+#                 } else if (ccmods[c]== "CNRM-CM5"){
+#                 numfolder <- 30840
+#                 } else if (ccmods[c]== "GFDL-CM3"){
+#                 numfolder <- 30861
+#                 } else if (ccmods[c]== "HadGEM2-ES"){
+#                 numfolder <- 30903
+#                 } else if (ccmods[c]== "MIROC5"){
+#                 numfolder <- 30924
+#                 } else print("Enter a valid model!")
+#               } else print("variables not defined!")
+#             } else print("rcp not defined!")
+#         baseurl <- "https://api.cal-adapt.org/media/img/"
+#         fullurl <- paste0(baseurl, numfolder, "/", varofinterest[v], "_month_", ccmods[c], "_", ccscenario[s], "_", time[t], "-", month[m], ".v0.CA_NV.tif")
+#         download.file(url=fullurl, destfile=paste0("D:/ml with cdec uf/Input Data/CEC/projected_data_monthly/", ccmods[[c]], "/", ccscenario[[s]], "/", varofinterest[[v]], "/", varofinterest[[v]], "_month_", ccmods[[c]], "_", ccscenario[[s]], "_", time[[t]], "-", month[[m]], ".v0.CA_NV.tif"), method="curl")
+#         }
+#       }
+#     }
+#   }
+# }
+```
+
+```{r cc_precip_monthly}
+# dir_list <- read.table(textConnection(getURLContent("https://api.cal-adapt.org/api/series/tasmax_year_CNRM-CM5_rcp45/rasters/")), sep = "", strip.white = TRUE)
+
+pmrast2006 <- raster("D:/ml with cdec uf/Input Data/CEC/projected_data_monthly/CanESM2/rcp85/Rainfall/Rainfall_month_CanESM2_rcp85_2006-01.v0.CA_NV.tif")
+
+stackf_monthly <- function(ccmods, varofinterest, ccscenario="rcp85"){
+  filelists <- list.files(paste0("D:/ml with cdec uf/Input Data/CEC/projected_data_monthly/", ccmods, "/", ccscenario, "/", varofinterest, "/"), pattern = "*.tif$")
+  stackcc <- raster::stack(paste0("D:/ml with cdec uf/Input Data/CEC/projected_data_monthly/", ccmods, "/", ccscenario, "/", varofinterest, "/", filelists))
+}
+  
+pmstack_CanESM2_85 <- stackf_monthly(ccmods[1], "rainfall", ccscenario="rcp85")
+pmstack_CNRMCM5_85 <- stackf_monthly(ccmods[2], "rainfall", ccscenario="rcp85")
+pmstack_HadGEM2ES_85 <- stackf_monthly(ccmods[3], "rainfall", ccscenario="rcp85")
+pmstack_MIROC5_85 <- stackf_monthly(ccmods[4], "rainfall", ccscenario="rcp85")
+
+pmstack_CanESM2_45 <- stackf_monthly(ccmods[1], "rainfall", ccscenario="rcp45")
+pmstack_CNRMCM5_45 <- stackf_monthly(ccmods[2], "rainfall", ccscenario="rcp45")
+pmstack_HadGEM2ES_45 <- stackf_monthly(ccmods[3], "rainfall", ccscenario="rcp45")
+pmstack_MIROC5_45 <- stackf_monthly(ccmods[4], "rainfall", ccscenario="rcp45")
+```
+
+```{r cc_tair_monthly}
+tmstack_CanESM2_85 <- stackf_monthly(ccmods[1], "Tair", ccscenario="rcp85")
+tmstack_CNRMCM5_85 <- stackf_monthly(ccmods[2], "Tair", ccscenario="rcp85")
+tmstack_HadGEM2ES_85 <- stackf_monthly(ccmods[3], "Tair", ccscenario="rcp85")
+tmstack_MIROC5_85 <- stackf_monthly(ccmods[4], "Tair", ccscenario="rcp85")
+
+tmstack_CanESM2_45 <- stackf_monthly(ccmods[1], "Tair", ccscenario="rcp45")
+tmstack_CNRMCM5_45 <- stackf_monthly(ccmods[2], "Tair", ccscenario="rcp45")
+tmstack_HadGEM2ES_45 <- stackf_monthly(ccmods[3], "Tair", ccscenario="rcp45")
+tmstack_MIROC5_45 <- stackf_monthly(ccmods[4], "Tair", ccscenario="rcp45")
+```
+
+```{r cc_runoff_monthly}
+# rmrast2006 <- raster("D:/ml with cdec uf/Input Data/CEC/projected_data_monthly/CanESM2/rcp85/runoff/runoff_month_CanESM2_rcp85_2006-01.v0.CA_NV.tif")
+
+rmstack_CanESM2_85 <- stackf_monthly(ccmods[1], "runoff", ccscenario="rcp85")
+rmstack_CNRMCM5_85 <- stackf_monthly(ccmods[2], "runoff", ccscenario="rcp85")
+rmstack_HadGEM2ES_85 <- stackf_monthly(ccmods[3], "runoff", ccscenario="rcp85")
+rmstack_MIROC5_85 <- stackf_monthly(ccmods[4], "runoff", ccscenario="rcp85")
+
+rmstack_CanESM2_45 <- stackf_monthly(ccmods[1], "runoff", ccscenario="rcp45")
+rmstack_CNRMCM5_45 <- stackf_monthly(ccmods[2], "runoff", ccscenario="rcp45")
+rmstack_HadGEM2ES_45 <- stackf_monthly(ccmods[3], "runoff", ccscenario="rcp45")
+rmstack_MIROC5_45 <- stackf_monthly(ccmods[4], "runoff", ccscenario="rcp45")
+```
+
+# 4.0 Processing
+## 4.1 Aggregation
+```{r precip_temp_aggregation}
+basins_inc_proj <- spTransform(basins_inc, crs(prast2030))
+# # aggregate temp and precip rasters by basin boundaries, old method
+# basins_inc_tmp <- extract(prism_tmp, basins_inc_proj, fun=mean,  weights=FALSE, small=TRUE)
+# basins_inc_ppt <- extract(prism_ppt, basins_inc_proj, fun=mean,  weights=FALSE, small=TRUE)
+ 
+# let's try cutting down the processing time with doParallel
+library(foreach)
+library(doParallel)
+
+cl <- makeCluster(4)
+registerDoParallel(cl)
+aggtobasinsf <- function(stack, boundaries, aggfun=mean){
+  boundaries_stack <- foreach(i=1:nrow(boundaries@data), .combine=rbind) %dopar% {
+  library(raster)
+  extract(stack, boundaries[i,], fun=aggfun,  weights=FALSE, small=TRUE)
+  }
+  stopImplicitCluster()
+  boundaries_stack
+}
+
+# basins_inc_ppt_CanESM2_85 <- aggtobasinsf(pmstack_CanESM2_85, basins_inc_proj, mean)
+# basins_inc_ppt_CNRMCM5_85 <- aggtobasinsf(pmstack_CNRMCM5_85, basins_inc_proj, mean)
+# basins_inc_ppt_HadGEM2ES_85 <- aggtobasinsf(pmstack_HadGEM2ES_85, basins_inc_proj, mean)
+# basins_inc_ppt_MIROC5_85 <- aggtobasinsf(pmstack_MIROC5_85, basins_inc_proj, mean)
+# 
+# basins_inc_tmp_CanESM2_85 <- aggtobasinsf(tmstack_CanESM2_85, basins_inc_proj, mean)
+# basins_inc_tmp_CNRMCM5_85 <- aggtobasinsf(tmstack_CNRMCM5_85, basins_inc_proj, mean)
+# basins_inc_tmp_HadGEM2ES_85 <- aggtobasinsf(tmstack_HadGEM2ES_85, basins_inc_proj, mean)
+# basins_inc_tmp_MIROC5_85 <- aggtobasinsf(tmstack_MIROC5_85, basins_inc_proj, mean)
+# 
+# basins_inc_rnf_CanESM2_85 <- aggtobasinsf(rmstack_CanESM2_85, basins_inc_proj, mean)
+# basins_inc_rnf_CNRMCM5_85 <- aggtobasinsf(rmstack_CNRMCM5_85, basins_inc_proj, mean)
+# basins_inc_rnf_HadGEM2ES_85 <- aggtobasinsf(rmstack_HadGEM2ES_85, basins_inc_proj, mean)
+# basins_inc_rnf_MIROC5_85 <- aggtobasinsf(rmstack_MIROC5_85, basins_inc_proj, mean)
+# 
+# basins_inc_ppt_CanESM2_45 <- aggtobasinsf(pmstack_CanESM2_45, basins_inc_proj, mean)
+# basins_inc_ppt_CNRMCM5_45 <- aggtobasinsf(pmstack_CNRMCM5_45, basins_inc_proj, mean)
+# basins_inc_ppt_HadGEM2ES_45 <- aggtobasinsf(pmstack_HadGEM2ES_45, basins_inc_proj, mean)
+# basins_inc_ppt_MIROC5_45 <- aggtobasinsf(pmstack_MIROC5_45, basins_inc_proj, mean)
+# 
+# basins_inc_tmp_CanESM2_45 <- aggtobasinsf(tmstack_CanESM2_45, basins_inc_proj, mean)
+# basins_inc_tmp_CNRMCM5_45 <- aggtobasinsf(tmstack_CNRMCM5_45, basins_inc_proj, mean)
+# basins_inc_tmp_HadGEM2ES_45 <- aggtobasinsf(tmstack_HadGEM2ES_45, basins_inc_proj, mean)
+# basins_inc_tmp_MIROC5_45 <- aggtobasinsf(tmstack_MIROC5_45, basins_inc_proj, mean)
+# 
+# basins_inc_rnf_CanESM2_45 <- aggtobasinsf(rmstack_CanESM2_45, basins_inc_proj, mean)
+# basins_inc_rnf_CNRMCM5_45 <- aggtobasinsf(rmstack_CNRMCM5_45, basins_inc_proj, mean)
+# basins_inc_rnf_HadGEM2ES_45 <- aggtobasinsf(rmstack_HadGEM2ES_45, basins_inc_proj, mean)
+# basins_inc_rnf_MIROC5_45 <- aggtobasinsf(rmstack_MIROC5_45, basins_inc_proj, mean)
+# 
+# # # plot examples to check
+# # plot(basins_inc_ppt_CNRMCM5_85[, 10])
+# # plot(basins_inc_tmp_CNRMCM5_85[, 1128])
+# # 
+# # write to csv
+# write.csv(basins_inc_ppt_CanESM2_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_CNRMCM5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_HadGEM2ES_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_MIROC5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_CanESM2_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_CNRMCM5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_HadGEM2ES_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_MIROC5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_CanESM2_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_CNRMCM5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_HadGEM2ES_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_MIROC5_85, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_RNF.csv", row.names = FALSE)
+# 
+# write.csv(basins_inc_ppt_CanESM2_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_CNRMCM5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_HadGEM2ES_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_ppt_MIROC5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_PPT.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_CanESM2_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_CNRMCM5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_HadGEM2ES_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_tmp_MIROC5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_TMP.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_CanESM2_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_CNRMCM5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_HadGEM2ES_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_RNF.csv", row.names = FALSE)
+# write.csv(basins_inc_rnf_MIROC5_45, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_RNF.csv", row.names = FALSE)
+
+# read in, first make a copy of the dataframes 
+basins_inc_CanESM2_85 <- basins_inc_CNRMCM5_85 <- basins_inc_MIROC5_85 <- basins_inc_HadGEM2ES_85 <- basins_inc
+basins_inc_CanESM2_45 <- basins_inc_CNRMCM5_45 <- basins_inc_MIROC5_45 <- basins_inc_HadGEM2ES_45 <- basins_inc
+
+basins_inc_CanESM2_85@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_PPT.csv")
+basins_inc_CNRMCM5_85@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_PPT.csv")
+basins_inc_HadGEM2ES_85@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_PPT.csv")
+basins_inc_MIROC5_85@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_PPT.csv")
+basins_inc_CanESM2_85@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_TMP.csv")
+basins_inc_CNRMCM5_85@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_TMP.csv")
+basins_inc_HadGEM2ES_85@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_TMP.csv")
+basins_inc_MIROC5_85@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_TMP.csv")
+basins_inc_CanESM2_85@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_85_RNF.csv")
+basins_inc_CNRMCM5_85@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_85_RNF.csv")
+basins_inc_HadGEM2ES_85@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_85_RNF.csv")
+basins_inc_MIROC5_85@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_85_RNF.csv")
+
+basins_inc_CanESM2_45@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_PPT.csv")
+basins_inc_CNRMCM5_45@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_PPT.csv")
+basins_inc_HadGEM2ES_45@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_PPT.csv")
+basins_inc_MIROC5_45@data$PPT <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_PPT.csv")
+basins_inc_CanESM2_45@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_TMP.csv")
+basins_inc_CNRMCM5_45@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_TMP.csv")
+basins_inc_HadGEM2ES_45@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_TMP.csv")
+basins_inc_MIROC5_45@data$TMP <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_TMP.csv")
+basins_inc_CanESM2_45@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CanESM2_45_RNF.csv")
+basins_inc_CNRMCM5_45@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CNRMCM5_45_RNF.csv")
+basins_inc_HadGEM2ES_45@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_HadGEM2ES_45_RNF.csv")
+basins_inc_MIROC5_45@data$RNF <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MIROC5_45_RNF.csv")
+
+# fix the column names as actual dates, the years are 2015-2099
+date_formatted <- seq(as.Date("2006/1/1"), as.Date("2099/12/1"), "month")
+
+# since the precip and temp data are for the same time series change the column names on both dataframes
+colnames(basins_inc_CanESM2_85@data$PPT) <- colnames(basins_inc_CNRMCM5_85@data$PPT) <- colnames(basins_inc_MIROC5_85@data$PPT) <- colnames(basins_inc_HadGEM2ES_85@data$PPT) <- date_formatted
+colnames(basins_inc_CanESM2_85@data$TMP) <- colnames(basins_inc_CNRMCM5_85@data$TMP) <- colnames(basins_inc_MIROC5_85@data$TMP) <- colnames(basins_inc_HadGEM2ES_85@data$TMP) <- date_formatted
+colnames(basins_inc_CanESM2_85@data$RNF) <- colnames(basins_inc_CNRMCM5_85@data$RNF) <- colnames(basins_inc_MIROC5_85@data$RNF) <- colnames(basins_inc_HadGEM2ES_85@data$RNF) <- date_formatted
+
+colnames(basins_inc_CanESM2_45@data$PPT) <- colnames(basins_inc_CNRMCM5_45@data$PPT) <- colnames(basins_inc_MIROC5_45@data$PPT) <- colnames(basins_inc_HadGEM2ES_45@data$PPT) <- date_formatted
+colnames(basins_inc_CanESM2_45@data$TMP) <- colnames(basins_inc_CNRMCM5_45@data$TMP) <- colnames(basins_inc_MIROC5_45@data$TMP) <- colnames(basins_inc_HadGEM2ES_45@data$TMP) <- date_formatted
+colnames(basins_inc_CanESM2_45@data$RNF) <- colnames(basins_inc_CNRMCM5_45@data$RNF) <- colnames(basins_inc_MIROC5_45@data$RNF) <- colnames(basins_inc_HadGEM2ES_45@data$RNF) <- date_formatted
+```
+
+## 4.2 Lags
+```{r cec_lags}
+# lag-1: lag temp and precip by one month (meaning the previous time steps data will be associated with the current month)
+# lag-2: lag temp and precip by two months or lag lag-1 by one month
+lagfunc <- function(basins_inc){
+  date_formatted <- seq(as.Date("2006/1/1"), as.Date("2099/12/1"), "month")
+  
+  tmplag1 <- tmplag2 <- tmplag3 <- basins_inc@data$TMP
+  colnames(tmplag1) <- date_vector_lag1 <- c(date_formatted[2:length(date_formatted)], NA)
+  colnames(tmplag2) <- date_vector_lag2 <- c(date_vector_lag1[2:length(date_formatted)], NA)
+  colnames(tmplag3) <- c(date_vector_lag2[2:length(date_formatted)], NA)
+
+  # delete the last month, and last two months, and the last three months, because of the lagging we won't have ppt and tmp complete information
+  basins_inc$TMPLAG1 <- tmplag1[1:(length(tmplag1)-1)]
+  basins_inc$TMPLAG2 <- tmplag2[1:(length(tmplag1)-2)]
+  basins_inc$TMPLAG3 <- tmplag3[1:(length(tmplag1)-3)]
+  
+  pptlag1 <- pptlag2 <- pptlag3 <- basins_inc@data$PPT
+  colnames(pptlag1) <- date_vector_lag1 <- c(date_formatted[2:length(date_formatted)], NA)
+  colnames(pptlag2) <- date_vector_lag2 <- c(date_vector_lag1[2:length(date_formatted)], NA)
+  colnames(pptlag3) <- c(date_vector_lag2[2:length(date_formatted)], NA)
+
+  basins_inc$PPTLAG1 <- pptlag1[1:(length(pptlag1)-1)]
+  basins_inc$PPTLAG2 <- pptlag2[1:(length(pptlag1)-2)]
+  basins_inc$PPTLAG3 <- pptlag3[1:(length(pptlag1)-3)]
+  return(basins_inc)
+}
+
+basins_inc_CanESM2_85 <- lagfunc(basins_inc_CanESM2_85)
+basins_inc_CNRMCM5_85 <- lagfunc(basins_inc_CNRMCM5_85)
+basins_inc_MIROC5_85 <- lagfunc(basins_inc_MIROC5_85)
+basins_inc_HadGEM2ES_85 <- lagfunc(basins_inc_HadGEM2ES_85)
+
+basins_inc_CanESM2_45 <- lagfunc(basins_inc_CanESM2_45)
+basins_inc_CNRMCM5_45 <- lagfunc(basins_inc_CNRMCM5_45)
+basins_inc_MIROC5_45 <- lagfunc(basins_inc_MIROC5_45)
+basins_inc_HadGEM2ES_45 <- lagfunc(basins_inc_HadGEM2ES_45)
+```
+
+## 4.3 Formatting
+```{r cec_formatting}
+climatevar_formatting <- function(basins_inc, varname){
+  tmp_df <- cbind(basins_inc@data$STATION, basins_inc@data[, varname])
+  colnames(tmp_df)[1] <- "CDEC_ID"
+  tmp_df_long <- reshape2:::melt.data.frame(tmp_df, id.var ="CDEC_ID", measure.var = 2:(ncol(tmp_df)), variable.name = "DATE", value.name = varname)
+  tmp_df_long
+}
+
+# CanESM2
+CanESM2_85_rnf_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "RNF")
+CanESM2_85_tmp_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "TMP")
+CanESM2_85_tmplag1_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "TMPLAG1")
+CanESM2_85_tmplag2_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "TMPLAG2")
+CanESM2_85_tmplag3_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "TMPLAG3")
+CanESM2_85_ppt_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "PPT")
+CanESM2_85_pptlag1_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "PPTLAG1")
+CanESM2_85_pptlag2_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "PPTLAG2")
+CanESM2_85_pptlag3_df_long <- climatevar_formatting(basins_inc_CanESM2_85, "PPTLAG3")
+
+CanESM2_45_rnf_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "RNF")
+CanESM2_45_tmp_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "TMP")
+CanESM2_45_tmplag1_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "TMPLAG1")
+CanESM2_45_tmplag2_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "TMPLAG2")
+CanESM2_45_tmplag3_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "TMPLAG3")
+CanESM2_45_ppt_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "PPT")
+CanESM2_45_pptlag1_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "PPTLAG1")
+CanESM2_45_pptlag2_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "PPTLAG2")
+CanESM2_45_pptlag3_df_long <- climatevar_formatting(basins_inc_CanESM2_45, "PPTLAG3")
+
+# CNRMCM5
+CNRMCM5_85_rnf_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "RNF")
+CNRMCM5_85_tmp_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "TMP")
+CNRMCM5_85_tmplag1_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "TMPLAG1")
+CNRMCM5_85_tmplag2_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "TMPLAG2")
+CNRMCM5_85_tmplag3_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "TMPLAG3")
+CNRMCM5_85_ppt_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "PPT")
+CNRMCM5_85_pptlag1_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "PPTLAG1")
+CNRMCM5_85_pptlag2_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "PPTLAG2")
+CNRMCM5_85_pptlag3_df_long <- climatevar_formatting(basins_inc_CNRMCM5_85, "PPTLAG3")
+
+CNRMCM5_45_rnf_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "RNF")
+CNRMCM5_45_tmp_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "TMP")
+CNRMCM5_45_tmplag1_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "TMPLAG1")
+CNRMCM5_45_tmplag2_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "TMPLAG2")
+CNRMCM5_45_tmplag3_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "TMPLAG3")
+CNRMCM5_45_ppt_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "PPT")
+CNRMCM5_45_pptlag1_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "PPTLAG1")
+CNRMCM5_45_pptlag2_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "PPTLAG2")
+CNRMCM5_45_pptlag3_df_long <- climatevar_formatting(basins_inc_CNRMCM5_45, "PPTLAG3")
+
+# HadGEM2ES
+HadGEM2ES_85_rnf_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "RNF")
+HadGEM2ES_85_tmp_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "TMP")
+HadGEM2ES_85_tmplag1_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "TMPLAG1")
+HadGEM2ES_85_tmplag2_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "TMPLAG2")
+HadGEM2ES_85_tmplag3_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "TMPLAG3")
+HadGEM2ES_85_ppt_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "PPT")
+HadGEM2ES_85_pptlag1_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "PPTLAG1")
+HadGEM2ES_85_pptlag2_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "PPTLAG2")
+HadGEM2ES_85_pptlag3_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_85, "PPTLAG3")
+
+HadGEM2ES_45_rnf_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "RNF")
+HadGEM2ES_45_tmp_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "TMP")
+HadGEM2ES_45_tmplag1_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "TMPLAG1")
+HadGEM2ES_45_tmplag2_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "TMPLAG2")
+HadGEM2ES_45_tmplag3_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "TMPLAG3")
+HadGEM2ES_45_ppt_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "PPT")
+HadGEM2ES_45_pptlag1_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "PPTLAG1")
+HadGEM2ES_45_pptlag2_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "PPTLAG2")
+HadGEM2ES_45_pptlag3_df_long <- climatevar_formatting(basins_inc_HadGEM2ES_45, "PPTLAG3")
+
+# MIROC5
+MIROC5_85_rnf_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "RNF")
+MIROC5_85_tmp_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "TMP")
+MIROC5_85_tmplag1_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "TMPLAG1")
+MIROC5_85_tmplag2_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "TMPLAG2")
+MIROC5_85_tmplag3_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "TMPLAG3")
+MIROC5_85_ppt_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "PPT")
+MIROC5_85_pptlag1_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "PPTLAG1")
+MIROC5_85_pptlag2_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "PPTLAG2")
+MIROC5_85_pptlag3_df_long <- climatevar_formatting(basins_inc_MIROC5_85, "PPTLAG3")
+
+MIROC5_45_rnf_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "RNF")
+MIROC5_45_tmp_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "TMP")
+MIROC5_45_tmplag1_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "TMPLAG1")
+MIROC5_45_tmplag2_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "TMPLAG2")
+MIROC5_45_tmplag3_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "TMPLAG3")
+MIROC5_45_ppt_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "PPT")
+MIROC5_45_pptlag1_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "PPTLAG1")
+MIROC5_45_pptlag2_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "PPTLAG2")
+MIROC5_45_pptlag3_df_long <- climatevar_formatting(basins_inc_MIROC5_45, "PPTLAG3")
+```
+
+## 4.5 Snow
+
+### 4.5.1 Cumulatives & Snow
+```{r ppt_cumulative}
+# will these lags be sufficient to represent ice and snow? No, according to Godsey(2013) in "Effects of changes in winter snowpacks on summer low flows: case studies in the Sierra Nevada, California, USA". They found that "at some locations, low flows exhibit a ‘memory effect’ in which they depend not only on the current year's snowpack but also on the previous year's snowpack." so do we need to have a cumulative rain that falls as snow (temp under 2degC) or maybe we need to bring in snow data.
+
+# make a water year function, october-september is considered a year
+wateryear <- function(dates, startmonth=10) {
+  dates <- as.Date(dates, format="%Y-%m-%d")
+  mon <- as.numeric(format(dates,"%m"))
+  year <- as.numeric(format(dates,"%Y"))
+  offset <- ifelse(mon < startmonth, 0, 1)
+  wtyr <- year + offset
+}
+
+cc_snow <- function(tmp_df_long, ppt_df_long){
+  pptcumul_df <- cbind(tmp_df_long, PPT=ppt_df_long$PPT)
+  pptcumul_df$YEAR <- substring(pptcumul_df$DATE, 1, 4)
+  pptcumul_df$MONTH <- month.abb[as.integer(substring(pptcumul_df$DATE, 6, 7))]
+  pptcumul_df$WATERYEAR <- wateryear(pptcumul_df$DATE, 10)
+  pptcumul_df$PPT_UNDER2 <- ifelse(pptcumul_df$TMP<=2,pptcumul_df$PPT,0)
+  
+  x <- y <- list() # for ppt and snow for each basin
+  for (i in unique(pptcumul_df$CDEC_ID)){
+    subset <- pptcumul_df[pptcumul_df$CDEC_ID==i,]
+    # in case it's not ordered, order subset by date
+    subset <- subset[order(as.Date(subset$DATE, format="%Y-%m-%d")),]
+    
+    # make empty vectors for ppt and snow for each wateryear
+    pptcumul_vect <-  snowcumul_vect <- numeric() 
+  
+    for (j in unique(subset$WATERYEAR)){
+      subsubset <- subset[subset$WATERYEAR==j,]
+      pptcumul <- cumsum(subsubset$PPT)
+      pptcumul_vect <- c(pptcumul_vect, pptcumul)
+      
+      snowcumul <- cumsum(subsubset$PPT_UNDER2)
+      snowcumul_vect <- c(snowcumul_vect, snowcumul)
+    }
+    x[[i]] <- pptcumul_vect
+    y[[i]] <- snowcumul_vect
+  }
+  
+  # # coerce list into a data frame, not doing it this way because the lengths are the same so make it a wide dataframe first
+  # xdf <- data.frame(PPTCUMUL=unlist(x, recursive=TRUE, use.names = TRUE))
+  # ydf <- data.frame(SNOW=unlist(y, recursive=TRUE, use.names = TRUE))
+  
+  # check the lengths of the lists
+  # for (n in names(x)){
+  #   print(length(x[[n]]))
+  # }
+  # 
+  # for (n in names(y)){
+  #   print(length(y[[n]]))
+  # }
+  
+  # since the lengths of the lists are all the same, make this list a dataframe
+  xdf <- as.data.frame(x)
+  xdf$DATE <- date_formatted
+  
+  ydf <- as.data.frame(y)
+  ydf$DATE <- date_formatted
+  
+  pptcumul_df_long <- reshape2:::melt.data.frame(xdf, id.var="DATE", measure.var = 1:(ncol(xdf)-1), variable.name = "CDEC_ID", value.name = "PPTCUMUL")
+  snow_df_long <- reshape2:::melt.data.frame(ydf, id.var="DATE", measure.var = 1:(ncol(ydf)-1), variable.name = "CDEC_ID", value.name = "SNOW")
+  return(list(CPPT=pptcumul_df_long, SNOW=snow_df_long))
+}
+
+# just save the snow_df_long, because we aren't doing cumulative dataframes anymore
+snow_df_long_cc_f <- function(cc_tmp_df_long, cc_ppt_df_long){
+  pptcumul_snow <- cc_snow(cc_tmp_df_long, cc_ppt_df_long)
+  pptcumul_df_long_cc <- pptcumul_snow[[1]]
+  snow_df_long_cc <- pptcumul_snow[[2]]
+  snow_df_long_cc
+}
+
+snow_df_long_CanESM2_85 <- snow_df_long_cc_f(CanESM2_85_tmp_df_long, CanESM2_85_ppt_df_long)
+snow_df_long_CNRMCM5_85 <- snow_df_long_cc_f(CNRMCM5_85_tmp_df_long, CNRMCM5_85_ppt_df_long)
+snow_df_long_HadGEM2ES_85 <- snow_df_long_cc_f(HadGEM2ES_85_tmp_df_long, HadGEM2ES_85_ppt_df_long)
+snow_df_long_MIROC5_85 <- snow_df_long_cc_f(MIROC5_85_tmp_df_long, MIROC5_85_ppt_df_long)
+
+snow_df_long_CanESM2_45 <- snow_df_long_cc_f(CanESM2_45_tmp_df_long, CanESM2_45_ppt_df_long)
+snow_df_long_CNRMCM5_45 <- snow_df_long_cc_f(CNRMCM5_45_tmp_df_long, CNRMCM5_45_ppt_df_long)
+snow_df_long_HadGEM2ES_45 <- snow_df_long_cc_f(HadGEM2ES_45_tmp_df_long, HadGEM2ES_45_ppt_df_long)
+snow_df_long_MIROC5_45 <- snow_df_long_cc_f(MIROC5_45_tmp_df_long, MIROC5_45_ppt_df_long)
+
+# consider making the beginning or record snow for each basin NA, not going to worry about this now
+```
+
+## 4.6 Basin Geometry
+```{r geometry}
+# drainage area
+library(rgeos)
+basins_inc@data$AREASQKM <- raster::area(basins_inc)/1000000 
+
+######################################################################################
+# shape
+# can be described as circular, rectangular, triangular, or pear. The latter is most common. Shape directly impacts the size of peak discharge and its arrival time at the basin outlet. Peak discharge for a circular basin will arrive sooner than that of an elongate basin of the same area because the tributary network in a circular basin is more compactly organized and tributary flows enter the mainstem at roughly the same time, thus more runoff is delivered to the outlet together, sooner (shorter duration, higher flood peak). L = Length of watershed/ W = Width of watershed
+
+library(dismo)
+basins_inc_spldf <- as(basins_inc, "SpatialLinesDataFrame")
+
+# need to make points for each basin seperately
+basins_inc_name <- unique(basins_inc_spldf@data$STATION)
+basins_inc_length <- c()
+basins_inc_width <- c()
+basins_inc_shape <- c()
+
+for (i in 1:length(basins_inc_name)){
+  h <- basins_inc_name[i]
+  sub_basins_inc <- basins_inc_spldf[basins_inc_spldf@data$STATION==h, ] 
+  # sample points on the basin boundary to create points
+  sub_sptdf <- spsample(sub_basins_inc, 10000, type="regular") 
+  # use rectHull to find the length and width of the basin
+  rect_hull <- rectHull(sub_sptdf)
+  rect_coords <- geom(polygons(rect_hull))
+  l1 <- pointDistance(rect_coords[1,5:6], rect_coords[2,5:6], lonlat=FALSE)
+  l2 <- pointDistance(rect_coords[2,5:6], rect_coords[3,5:6], lonlat=FALSE)
+  if(l1 > l2){
+    length <- l1
+    width <- l2
+  } else{
+    length <- l2
+    width <- l1
+  } 
+  basins_inc_length <- c(basins_inc_length, length) 
+  basins_inc_width <- c(basins_inc_width, width)
+  basins_inc_shape <- basins_inc_length/basins_inc_width
+}
+
+basins_inc@data$LENGTH <- basins_inc_length
+basins_inc@data$WIDTH <-  basins_inc_width
+basins_inc@data$SHAPE <- basins_inc_shape
+
+######################################################################################
+# basin compactness = area over perimeter^2*100
+library(geosphere)
+basins_inc_perimeter <- perimeter(spTransform(basins_inc, CRSobj=CRS("+proj=longlat +datum=NAD83")))
+
+basins_inc@data$COMPACTNESS <- basins_inc@data$AREASQKM*1000000/(basins_inc_perimeter^2)
+
+######################################################################################
+# drainage density
+# bring in NHD river network, crop to boundaries, compute lenght of line segments
+```
+
+## 4.7 Hypsometry -- SRTM
+```{r hypsometric}
+# What: alt = elevation data from the SRTM 90m model
+# type (extension): .grd 
+# time resolution: static  
+# spacial resolution: 90m (at the equator or 3 arc seconds). The vertical error of the DEMs is reported to be less than 16m. 
+# note: this data set is split for USA
+# units: meters
+# modifications: need to aggregate by basin
+
+## uncomment to download
+# elev <- getData('alt', country='USA', mask=TRUE) !!! this is not working anymore
+
+elev <- raster("D:/ml with cdec uf/Input Data/SRTM_Altitude/USA1_msk_alt.grd")
+basins_inc_transformed <- spTransform(basins_inc, crs(elev))
+
+# # uncomment to run again if needed
+# basins_inc_mean_elev <- extract(elev, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_mean_elev, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MEAN_ELEV.csv", row.names = FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MEAN_ELEV.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$MEANELEV <- test
+
+# gauge elevation: note, this turned out to be close to, but not exactly min elevation. we will use this in liu of min elevation when needed because in theory the lowest elevation should be at the gauge, but the gauge latlons are not quite exact. bad quality data, but what can you do...
+sptdf_transformed <- spTransform(sptdf, crs(elev))
+sptdf_transformed@data$GAUGEELEV <- extract(elev, sptdf_transformed)
+
+# # relief ratio (Pike and Wilson 1971): the Elevation-Relief Ratio provides hypsometric information about a watershed. = Zavg - Zmin / Zmax - Zmin
+# basins_inc_max_elev <- extract(elev, basins_inc_transformed, fun=max, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_max_elev, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MAX_ELEV.csv", row.names = FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_MAX_ELEV.csv")
+test <- test[-c(25, 93), ]
+basins_inc@data$MAXELEV <- test
+
+# basin relief ratio: the ratio between total relief (max elev-min elev) and basin length (long axis length)
+basins_inc@data$BASINRELIEFRATIO <- (basins_inc@data$MAXELEV-c(sptdf_transformed@data$GAUGEELEV, sptdf_transformed@data$GAUGEELEV))/basins_inc@data$LENGTH
+  
+# basin slope
+# center of raster cell that has min or max elevation
+# maxmindist <- gDistance()
+# basins_inc@data$SLOPE <- (basins_inc@data$MAXELEV-basins_inc@data$MINELEV)/maxmindist
+```
+
+Refs to check:
+Bedient (1992)
+Gray (1970)
+Grohmann & Riccomini (2009) Computers & Geosciences 35
+Montgomery & Brandon (2002) Earth and Planetary Science Letters 201
+Morisawa (1958)
+Sarangi et al. (2003)
+Sougnez & Vanacker (2011) Hydrology and Earth Systems Sciences 15
+Wisler (1959)
+Safran et al. (2005) ESPL 30, Fig. 7
+
+## 4.8 Soil Properties -- POLARIS
+```{r polaris}
+# What: SSURGO processed soil data, 3 arcsec (~100 m)
+# projection: Lambert Conformal Conic 
+# Datum: NAD83
+# url: http://stream.princeton.edu/POLARIS/PROPERTIES/3arcsec/
+# date retrieved: 05/11/17
+# type (extension): .tif 
+# time resolution: static  
+# spacial resolution: 100 m 
+# units: meters
+# modifications: need to aggregate by basin
+# credit: Nate Chaney
+
+# library(ncdf)
+# test <- raster('D:/ml with cdec uf/Input Data/POLARIS/lat4546_lon-93-92.nc')	 
+ksat <- raster('D:/ml with cdec uf/Input Data/POLARIS/ksat_mean_0_5.tif') # ksat - saturated hydraulic conductivity, cm/hr
+silt <- raster('D:/ml with cdec uf/Input Data/POLARIS/silt_mean_0_5.tif') # silt - silt percentage, %
+sand <- raster('D:/ml with cdec uf/Input Data/POLARIS/sand_mean_0_5.tif') # sand - sand percentage, %
+clay <- raster('D:/ml with cdec uf/Input Data/POLARIS/clay_mean_0_5.tif') # clay - clay percentage, %
+slope <- raster('D:/ml with cdec uf/Input Data/POLARIS/slope_mean.tif') # ??? not explained
+# plot(slope)
+awc <- raster('D:/ml with cdec uf/Input Data/POLARIS/awc_mean_0_5.tif') #awc - available water content, m3/m3
+# lambda - pore size distribution index (brooks-corey), N/A
+lambda_poresize <- raster('D:/ml with cdec uf/Input Data/POLARIS/lambda_mean_0_5.tif')
+# n - measure of the pore size distribution (van genuchten), N/A
+n_poresize <- raster('D:/ml with cdec uf/Input Data/POLARIS/n_mean_0_5.tif')
+# alpha - scale parameter inversely proportional to mean pore diameter (van genuchten), cm-1
+alpha_poresize <- raster('D:/ml with cdec uf/Input Data/POLARIS/alpha_mean_0_5.tif')
+resdt <- raster('D:/ml with cdec uf/Input Data/POLARIS/resdt_mean.tif') # resdt - depth to restriction layer, cm
+
+basins_inc_transformed <- spTransform(basins_inc, crs(ksat))
+
+# uncomment to extract
+# basins_inc_ksat <- extract(ksat, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_ksat, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_KSAT.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_KSAT.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$KSAT <- test
+
+# basins_inc_silt <- extract(silt, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_silt, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_SILT.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_SILT.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$SILT <- test
+
+# basins_inc_sand <- extract(sand, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_sand, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_SAND.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_SAND.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$SAND <- test
+
+# basins_inc_clay <- extract(clay, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_clay, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CLAY.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_CLAY.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$CLAY <- test
+
+# check that sand, silt and clay add up to 100, or close enough
+basins_inc@data$CLAY+basins_inc@data$SILT+basins_inc@data$SAND
+
+# basins_inc_awc <- extract(awc, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_awc, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_AWC.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_AWC.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$AWC <- test
+
+# basins_inc_lambda_poresize <- extract(lambda_poresize, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_lambda_poresize, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_LAMBDA.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_LAMBDA.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$LAMBDA <- test
+
+# basins_inc_n_poresize <- extract(n_poresize, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_n_poresize, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_N.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_N.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$N <- test
+
+# basins_inc_alpha_poresize <- extract(alpha_poresize, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_alpha_poresize, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_ALPHA.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_ALPHA.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$N <- test
+
+# basins_inc_resdt <- extract(resdt, basins_inc_transformed, fun=mean, weights=FALSE, small=TRUE, na.rm=TRUE)
+# write.csv(basins_inc_resdt, file="D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_RESDT.csv", row.names=FALSE)
+test <- read.csv("D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_RESDT.csv")
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$RESDT <- test
+
+# soil by hydrologic group A to D 
+# hydgrpdcd_ca <- raster('D:/ml with cdec uf/Input Data/SSURGO_CA/hydgrpdcd_ca_basins_inc.tif')
+
+# some more variables that I could consider but we don't want to add to the complexity of the model
+# mean permeability
+# mean water capacity
+# mean bulk density
+# mean organic matter
+# mean soil thickness
+# mean percent fine and coarse soils
+# mean soil erodibility factor (from Universal Soil Loss Equation)
+# mean runoff factor (from Universal Soil Loss Equation)
+```
+
+## 4.9 Land Cover -- CALVEG
+```{r calveg}
+# # did all of this in arcmap, was easier. keep incase needed
+# # calveg_cc <- raster('D:/ml with cdec uf/Input Data/CALVEG/cc')
+# # calveg_cv <- raster('D:/ml with cdec uf/Input Data/CALVEG/cv')
+# # calveg_gb <- raster('D:/ml with cdec uf/Input Data/CALVEG/gb')
+# # calveg_nce <- raster('D:/ml with cdec uf/Input Data/CALVEG/nce')
+# # calveg_ncm <- raster('D:/ml with cdec uf/Input Data/CALVEG/ncm')
+# # calveg_ncw <- raster('D:/ml with cdec uf/Input Data/CALVEG/ncw')
+# # calveg_ni <- raster('D:/ml with cdec uf/Input Data/CALVEG/ni')
+# # calveg_ns <- raster('D:/ml with cdec uf/Input Data/CALVEG/ns')
+# # calveg_sc <- raster('D:/ml with cdec uf/Input Data/CALVEG/sc')
+# # calveg_si <- raster('D:/ml with cdec uf/Input Data/CALVEG/si')
+# # calveg_ss <- raster('D:/ml with cdec uf/Input Data/CALVEG/ss')
+# #
+# # calveg_list <- list(calveg_cc, calveg_cv, calveg_gb, calveg_nce, calveg_ncm, calveg_ncw, calveg_ni, calveg_ns, calveg_sc, calveg_si, calveg_ss)
+# #
+# # lapply(calveg_list, origin)
+# # rasterOptions(tolerance = 0.1) # if you get different origin error
+# # .Machine$double.eps <- 0.000000001
+# #
+# # calveg <- merge(calveg_cc, calveg_cv)
+# # calveg <- merge(calveg, calveg_gb, tolerance=0.3)
+# # calveg <- merge(calveg, calveg_nce, tolerance=0.2)
+# # calveg <- merge(calveg, calveg_ncm, tolerance=0.3)
+# # calveg <- merge(calveg, calveg_ncw, tolerance=0.2)
+# # calveg <- merge(calveg, calveg_ni, tolerance=0.3)
+# # calveg <- merge(calveg, calveg_ns, tolerance=0.2)
+# # calveg <- merge(calveg, calveg_sc, tolerance=0.2)
+# # calveg <- merge(calveg, calveg_si, tolerance=0.2)
+# # calveg <- merge(calveg, calveg_ss, tolerance=0.2)
+# #
+# # do.call(merge, calveg_list)
+# 
+# calveg <- raster('D:/ml with cdec uf/Input Data/CALVEG/calveg_raster.tif')
+# 
+# # find the percentage of each covertype overlayed by each basin
+# 
+# # extract raster values to polygons
+# calveg_extracted <- extract(calveg, basins_inc)
+# 
+# # cet class counts for each polygon
+# calveg_extracted_counts <- lapply(calveg_extracted, table)
+# 
+# # calculate class percentages for each polygon
+# calveg_extracted_pct <- lapply(calveg_extracted_counts, FUN=function(x){x/sum(x)})
+# 
+# # check if it adds to 1
+# sum(calveg_extracted_pct[[4]])
+# 
+# # create a data.frame where missing classes are NA
+# class_df <- as.data.frame(t(sapply(calveg_extracted_pct,'[',1:length(unique(calveg)))))
+# 
+# # replace NA's with 0 and add names
+# class_df[is.na(class_df)] <- 0
+# names(class_df) <- paste("class", names(class_df),sep="")
+# names(class_df) <- calveg@data@attributes[[1]]$COVERTYPE
+# 
+# # now to percent vegetated, this includes all columns except for URB, BAR, WAT
+# # URB: urban
+# # BAR: baren
+# # SHB: shrub
+# # CON: conifers
+# # HDW: hardwoods
+# # WAT: water
+# # MIX: mix
+# # AGR: agriculture
+# 
+# class_df$VEGETATED <- apply(class_df[, c(3:6, 8:9)], 1, sum)
+# basins_inc@data$VEGETATED <- class_df$VEGETATED
+# 
+# write.csv(basins_inc@data$VEGETATED, 'D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_VEGETATED.csv')
+
+test <- read.csv('D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_VEGETATED.csv')
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$VEGETATED <- test$x
+```
+
+## 4.10 Geology -- NRCS
+```{r geo_data}
+# # Geology (Reed and Bush 2005)
+# # percent of basin each of nine geological classes
+# # dominant geologic class in basin
+# 
+# nrcsgeo_ca <- shapefile('D:/ml with cdec uf/Input Data/NRCS_GEOLOGY/geology_a_ca.shp')
+# nrcsgeo_nv <- shapefile('D:/ml with cdec uf/Input Data/NRCS_GEOLOGY/geology_a_nv.shp')
+# nrcsgeo_or <- shapefile('D:/ml with cdec uf/Input Data/NRCS_GEOLOGY/geology_a_or.shp')
+# nrcsgeo_wa <- shapefile('D:/ml with cdec uf/Input Data/NRCS_GEOLOGY/geology_a_wa.shp')
+# 
+# nrcsgeo_ca <- spTransform(nrcsgeo_ca, albers)
+# nrcsgeo_nv <- spTransform(nrcsgeo_nv, albers)
+# nrcsgeo_or <- spTransform(nrcsgeo_or, albers)
+# nrcsgeo_wa <- spTransform(nrcsgeo_wa, albers)
+# 
+# # find the percentage of each rock type overlayed by each basin
+# library(rgeos)
+# basins_inc_names <- basins_inc@data$STATION
+# rock_names <- unique(nrcsgeo_ca@data$ROCKTYPE1)
+# 
+# # initialize an empty data frame
+# df_basins_inc <- data.frame(matrix(0,nrow=length(basins_inc_names),ncol=length(rock_names)))
+# colnames(df_basins_inc) <- rock_names
+# rownames(df_basins_inc) <- basins_inc_names
+# for (r in 1:(length(basins_inc_names))){
+#   h <- basins_inc_names[r]
+#   sub_basin <- basins_inc[basins_inc@data$STATION==h,]
+#   sub_int <- intersect(nrcsgeo_ca, sub_basin)
+#   sub_int@data$PROPORTIONS <- (area(sub_int)/1000000)/sub_int@data$AREASQKM
+#   sub_int2 <- sub_int@data[sub_int@data$STATION==h,c("PROPORTIONS","ROCKTYPE1")]
+#   sub_int2 <- aggregate(PROPORTIONS~ROCKTYPE1, data=sub_int2, FUN="sum")
+#   if (nrow(sub_int2)>0){
+#     for (k in 1:length(sub_int2$ROCKTYPE1)){
+#       #cat("sub index number:",k,"\n")
+#       c <- sub_int2$ROCKTYPE1[k]
+#       col_num <- which(rock_names==c)
+#       cat("df index:",r,",",col_num,"\n")
+#       if (df_basins_inc[r,col_num]!=0){
+#         print("Note: this index already has a value")
+#       }
+#       df_basins_inc[r,col_num] <- sub_int2[k,"PROPORTIONS"]
+#     }
+#   }
+# }
+# 
+# df_basins_inc$DOMGEOLOGY <- colnames(df_basins_inc)[apply(df_basins_inc,1,which.max)]
+# write.csv(df_basins_inc$DOMGEOLOGY, 'D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_DOMGEO.csv')
+
+test <- read.csv('D:/ml with cdec uf/Input Data/CDEC_FNF/basins_inc_DOMGEO.csv')
+test <- test[-c(25, 93), ] # removing KLO and KLO_INC
+basins_inc@data$DOMGEOLOGY <- test$x
+```
+
+## 4.11 Unimpaired Flows -- CEC 
+What: raster stores from cal adapt api
+Type (extension): .tif  
+Time resolution: monthly 
+Spacial resolution: CA, NV
+Modifications: aggregate to basin boundartie sperformed above
+```{r unimpaired_flow}
+boxplot(basins_inc_CanESM2@data$RNF)
+# some pre processing done with climate vars,fix units here and then merge below 
+# change units from mm/day to mm/day*(drainage area in km^2) to AF/day (will change to AF/month later)
+
+cc_rnf_df_long_f <- function(cc_rnf_df_long, basins_inc){
+  cc_rnf_df_long <- merge(cc_rnf_df_long, basins_inc@data[, c("STATION", "AREASQKM")] , by.x="CDEC_ID", by.y="STATION")
+  # # did you sum or mean the runoff in aggtobasins function? meaned so need to multiply by basin drainage area
+  cc_rnf_df_long$RNF <- cc_rnf_df_long$RNF*cc_rnf_df_long$AREASQKM*0.810714
+  
+  # summed? do this instead
+  # cc_rnf_df_long$RNF <- cc_rnf_df_long$RNF*FINDTHECONVERSION
+  cc_rnf_df_long <- cc_rnf_df_long[, c(1:3)]
+  cc_rnf_df_long
+}
+
+CanESM2_85_rnf_df_long <- cc_rnf_df_long_f(CanESM2_85_rnf_df_long, basins_inc)
+CNRMCM5_85_rnf_df_long <- cc_rnf_df_long_f(CNRMCM5_85_rnf_df_long, basins_inc)
+HadGEM2ES_85_rnf_df_long <- cc_rnf_df_long_f(HadGEM2ES_85_rnf_df_long, basins_inc)
+MIROC5_85_rnf_df_long <- cc_rnf_df_long_f(MIROC5_85_rnf_df_long, basins_inc)
+CanESM2_45_rnf_df_long <- cc_rnf_df_long_f(CanESM2_45_rnf_df_long, basins_inc)
+CNRMCM5_45_rnf_df_long <- cc_rnf_df_long_f(CNRMCM5_45_rnf_df_long, basins_inc)
+HadGEM2ES_45_rnf_df_long <- cc_rnf_df_long_f(HadGEM2ES_45_rnf_df_long, basins_inc)
+MIROC5_45_rnf_df_long <- cc_rnf_df_long_f(MIROC5_45_rnf_df_long, basins_inc)
+```
+
+## 4.12 Month & Season & Year
+```{r month}
+# make a season finding function
+getseason <- function(dates) {
+    WS <- as.Date("2012-12-15", format = "%Y-%m-%d") # Winter Solstice
+    SE <- as.Date("2012-3-15",  format = "%Y-%m-%d") # Spring Equinox
+    SS <- as.Date("2012-6-15",  format = "%Y-%m-%d") # Summer Solstice
+    FE <- as.Date("2012-9-15",  format = "%Y-%m-%d") # Fall Equinox
+
+    # Convert dates from any year to 2012 dates
+    d <- as.Date(strftime(dates, format="2012-%m-%d"))
+
+    ifelse (d >= WS | d < SE, "Winter",
+      ifelse (d >= SE & d < SS, "Spring",
+        ifelse (d >= SS & d < FE, "Summer", "Fall")))
+}
+```
+
+# 5.0 Data Prep for modelling  
+```{r bind_data}
+df$AREASQKM <- basins_inc$AREASQKM # consider making this a factor
+df$SHAPE <- basins_inc$SHAPE
+df$COMPACTNESS <- basins_inc$COMPACTNESS
+df$MEANELEV <- basins_inc$MEANELEV
+df$BASINRELIEFRATIO <- basins_inc$BASINRELIEFRATIO
+df$KSAT <- basins_inc$KSAT
+df$SILT <- basins_inc$SILT
+df$SAND <- basins_inc$SAND
+df$CLAY <- basins_inc$CLAY
+df$AWC <- basins_inc$AWC
+df$LAMBDA <- basins_inc$LAMBDA
+df$N <- basins_inc$N
+df$RESDT <- basins_inc$RESDT
+df$VEGETATED <- basins_inc$VEGETATED
+df$DOMGEOLOGY <- basins_inc$DOMGEOLOGY
+df$HIERARCHY <- basins_inc$HIERARCHY <- factor((basins_inc$STATIONS_ABOVE1!="none") + (basins_inc$STATIONS_ABOVE2!="none") +  (basins_inc$STATIONS_ABOVE3!="none") + (basins_inc$STATIONS_ABOVE4!="none") + 1)
+
+# now for climate variables
+merge_ccvars <- function(df, rnf_df_long, tmp_df_long, tmplag1_df_long, tmplag2_df_long, tmplag3_df_long, ppt_df_long, pptlag1_df_long, pptlag2_df_long, pptlag3_df_long, snow_df_long){
+  moddf <- merge(rnf_df_long, df, by="CDEC_ID")
+  moddf$DATE <- as.Date(moddf$DATE, format="%Y-%m-%d")
+  moddf <- merge(moddf, tmp_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, tmplag1_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, tmplag2_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, tmplag3_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, ppt_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, pptlag1_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, pptlag2_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, pptlag3_df_long, by=c("DATE","CDEC_ID"))
+  moddf <- merge(moddf, snow_df_long, by=c("DATE","CDEC_ID"))
+  moddf
+}
+
+CanESM2_85_moddf <- merge_ccvars(df, CanESM2_85_rnf_df_long, CanESM2_85_tmp_df_long, CanESM2_85_tmplag1_df_long, CanESM2_85_tmplag2_df_long, CanESM2_85_tmplag3_df_long, CanESM2_85_ppt_df_long, CanESM2_85_pptlag1_df_long, CanESM2_85_pptlag2_df_long, CanESM2_85_pptlag3_df_long, snow_df_long_CanESM2_85)
+CNRMCM5_85_moddf <- merge_ccvars(df, CNRMCM5_85_rnf_df_long, CNRMCM5_85_tmp_df_long, CNRMCM5_85_tmplag1_df_long, CNRMCM5_85_tmplag2_df_long, CNRMCM5_85_tmplag3_df_long, CNRMCM5_85_ppt_df_long, CNRMCM5_85_pptlag1_df_long, CNRMCM5_85_pptlag2_df_long, CNRMCM5_85_pptlag3_df_long, snow_df_long_CNRMCM5_85)
+MIROC5_85_moddf <- merge_ccvars(df, MIROC5_85_rnf_df_long, MIROC5_85_tmp_df_long, MIROC5_85_tmplag1_df_long, MIROC5_85_tmplag2_df_long, MIROC5_85_tmplag3_df_long, MIROC5_85_ppt_df_long, MIROC5_85_pptlag1_df_long, MIROC5_85_pptlag2_df_long, MIROC5_85_pptlag3_df_long, snow_df_long_MIROC5_85)
+HadGEM2ES_85_moddf <- merge_ccvars(df, HadGEM2ES_85_rnf_df_long, HadGEM2ES_85_tmp_df_long, HadGEM2ES_85_tmplag1_df_long, HadGEM2ES_85_tmplag2_df_long, HadGEM2ES_85_tmplag3_df_long, HadGEM2ES_85_ppt_df_long, HadGEM2ES_85_pptlag1_df_long, HadGEM2ES_85_pptlag2_df_long, HadGEM2ES_85_pptlag3_df_long, snow_df_long_HadGEM2ES_85)
+
+CanESM2_45_moddf <- merge_ccvars(df, CanESM2_45_rnf_df_long, CanESM2_45_tmp_df_long, CanESM2_45_tmplag1_df_long, CanESM2_45_tmplag2_df_long, CanESM2_45_tmplag3_df_long, CanESM2_45_ppt_df_long, CanESM2_45_pptlag1_df_long, CanESM2_45_pptlag2_df_long, CanESM2_45_pptlag3_df_long, snow_df_long_CanESM2_45)
+CNRMCM5_45_moddf <- merge_ccvars(df, CNRMCM5_45_rnf_df_long, CNRMCM5_45_tmp_df_long, CNRMCM5_45_tmplag1_df_long, CNRMCM5_45_tmplag2_df_long, CNRMCM5_45_tmplag3_df_long, CNRMCM5_45_ppt_df_long, CNRMCM5_45_pptlag1_df_long, CNRMCM5_45_pptlag2_df_long, CNRMCM5_45_pptlag3_df_long, snow_df_long_CNRMCM5_45)
+MIROC5_45_moddf <- merge_ccvars(df, MIROC5_45_rnf_df_long, MIROC5_45_tmp_df_long, MIROC5_45_tmplag1_df_long, MIROC5_45_tmplag2_df_long, MIROC5_45_tmplag3_df_long, MIROC5_45_ppt_df_long, MIROC5_45_pptlag1_df_long, MIROC5_45_pptlag2_df_long, MIROC5_45_pptlag3_df_long, snow_df_long_MIROC5_45)
+HadGEM2ES_45_moddf <- merge_ccvars(df, HadGEM2ES_45_rnf_df_long, HadGEM2ES_45_tmp_df_long, HadGEM2ES_45_tmplag1_df_long, HadGEM2ES_45_tmplag2_df_long, HadGEM2ES_45_tmplag3_df_long, HadGEM2ES_45_ppt_df_long, HadGEM2ES_45_pptlag1_df_long, HadGEM2ES_45_pptlag2_df_long, HadGEM2ES_45_pptlag3_df_long, snow_df_long_HadGEM2ES_45)
+
+# DATE, MONTH, MONTH_ORDINAL, SEASON, YEAR, WATERYEAR
+time_processing <- function(moddf){
+  moddf$MONTH <- month.abb[as.integer(substring(moddf$DATE, 6, 7))]
+  # make a variable that captures the distance from October (the start of the new water year)
+  # this is messing up the order
+  ordinal <- c(4,5,6,7,6,5,4,3,2,1,2,3)
+  key <- data.frame(MONTH_ORDINAL=ordinal, mat=month.abb)
+  moddf <- merge(moddf, key, by.x = "MONTH", by.y = "mat")
+  moddf$SEASON <- as.factor(getseason(moddf$DATE))
+  moddf$YEAR <- as.numeric(substring(moddf$DATE, 1, 4))
+  moddf$WATERYEAR <- wateryear(moddf$DATE, startmonth=10)
+  moddf
+}
+
+CanESM2_85_moddf <- time_processing(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- time_processing(CNRMCM5_85_moddf)
+MIROC5_85_moddf <- time_processing(MIROC5_85_moddf)
+HadGEM2ES_85_moddf <- time_processing(HadGEM2ES_85_moddf)
+
+CanESM2_45_moddf <- time_processing(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- time_processing(CNRMCM5_45_moddf)
+MIROC5_45_moddf <- time_processing(MIROC5_45_moddf)
+HadGEM2ES_45_moddf <- time_processing(HadGEM2ES_45_moddf)
+
+# Here is what's in the dataframe
+dput(names(CanESM2_85_moddf))
+
+# order the columns somewhat logically, add FLOW when/if you add in cc flows
+order_colf <- function(moddf){
+  moddf <- moddf[, c("DATE", "CDEC_ID", "STATION_NAME", "RIVER_BASIN", "COUNTY", "OPERATOR", "STATIONS_ABOVE1", "STATIONS_ABOVE2", "STATIONS_ABOVE3", "STATIONS_ABOVE4", "HIERARCHY", "LONGITUDE", "LATITUDE", "MONTH", "MONTH_ORDINAL", "SEASON", "YEAR", "WATERYEAR", "TMP", "TMPLAG1", "TMPLAG2", "TMPLAG3", "PPT", "PPTLAG1", "PPTLAG2", "PPTLAG3", "SNOW", "AREASQKM", "SHAPE", "COMPACTNESS", "MEANELEV", "BASINRELIEFRATIO", "KSAT", "SILT", "SAND", "CLAY", "AWC", "LAMBDA", "N", "RESDT", "VEGETATED", "DOMGEOLOGY", "RNF")]
+}
+
+CanESM2_85_moddf <- order_colf(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- order_colf(CNRMCM5_85_moddf)
+HadGEM2ES_85_moddf <- order_colf(HadGEM2ES_85_moddf)
+MIROC5_85_moddf <- order_colf(MIROC5_85_moddf)
+
+CanESM2_45_moddf <- order_colf(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- order_colf(CNRMCM5_45_moddf)
+HadGEM2ES_45_moddf <- order_colf(HadGEM2ES_45_moddf)
+MIROC5_45_moddf <- order_colf(MIROC5_45_moddf)
+
+# change colname from RNF to FLOW
+fixnamecolf <- function(moddf){
+  colnames(moddf)[ncol(moddf)] <- "FLOW"
+  moddf
+}
+
+CanESM2_85_moddf <- fixnamecolf(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- fixnamecolf(CNRMCM5_85_moddf)
+HadGEM2ES_85_moddf <- fixnamecolf(HadGEM2ES_85_moddf)
+MIROC5_85_moddf <- fixnamecolf(MIROC5_85_moddf)
+
+CanESM2_45_moddf <- fixnamecolf(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- fixnamecolf(CNRMCM5_45_moddf)
+HadGEM2ES_45_moddf <- fixnamecolf(HadGEM2ES_45_moddf)
+MIROC5_45_moddf <- fixnamecolf(MIROC5_45_moddf)
+```
+
+```{r checks}
+# check units
+moddf <- readRDS("D:/ml with cdec uf/Intermediary Data/moddf.rds")
+# seems like the units are not congruent (mm/d, and mm/month)
+summary(CanESM2_85_moddf$PPT*30)
+summary(moddf$PPT) 
+
+# seems like the units are not congruent (AF/d, and AF/month)
+summary(CanESM2_85_moddf$FLOW*30)
+summary(moddf$FLOW)
+
+summary(CanESM2_85_moddf$SNOW*30)
+summary(moddf$SNOW)
+
+fixunitsf <- function(cc_moddf){
+  cc_moddf$PPT <- cc_moddf$PPT*30
+  cc_moddf$PPTLAG1 <- cc_moddf$PPTLAG1*30
+  cc_moddf$PPTLAG2 <- cc_moddf$PPTLAG2*30
+  cc_moddf$PPTLAG3 <- cc_moddf$PPTLAG3*30
+  cc_moddf$SNOW <- cc_moddf$SNOW*30
+  cc_moddf$FLOW <- cc_moddf$FLOW*30
+  cc_moddf
+}
+
+CanESM2_85_moddf <- fixunitsf(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- fixunitsf(CNRMCM5_85_moddf)
+HadGEM2ES_85_moddf <- fixunitsf(HadGEM2ES_85_moddf)
+MIROC5_85_moddf <- fixunitsf(MIROC5_85_moddf)
+
+CanESM2_45_moddf <- fixunitsf(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- fixunitsf(CNRMCM5_45_moddf)
+HadGEM2ES_45_moddf <- fixunitsf(HadGEM2ES_45_moddf)
+MIROC5_45_moddf <- fixunitsf(MIROC5_45_moddf)
+
+summary(CanESM2_85_moddf$FLOW)
+summary(moddf$FLOW)
+```
+
+```{r cumul_dataframe}
+# not doing this
+```
+
+```{r final_touches}
+# clean up column types if needed
+str(CanESM2_85_moddf)
+str(basins_inc@data)
+
+# check a few things
+plot(CanESM2_85_moddf$PPT, CanESM2_85_moddf$FLOW)
+
+# don't omit the NAs, let't keep a full record (so it's easier to see where the holes are) and deal with the NAs when modelling.
+
+# output the dataframe to a .rds. use this for larger data 
+saveRDS(basins_inc_CanESM2_85, file="D:/ml with cdec uf/Intermediary Data/CanESM2_85_basinsdf.rds")
+saveRDS(basins_inc_CNRMCM5_85, file="D:/ml with cdec uf/Intermediary Data/CNRMCM5_85_basinsdf.rds")
+saveRDS(basins_inc_MIROC5_85, file="D:/ml with cdec uf/Intermediary Data/MIROC5_85_basinsdf.rds")
+saveRDS(basins_inc_HadGEM2ES_85, file="D:/ml with cdec uf/Intermediary Data/HadGEM2ES_85_basinsdf.rds")
+
+saveRDS(basins_inc_CanESM2_45, file="D:/ml with cdec uf/Intermediary Data/CanESM2_45_basinsdf.rds")
+saveRDS(basins_inc_CNRMCM5_45, file="D:/ml with cdec uf/Intermediary Data/CNRMCM5_45_basinsdf.rds")
+saveRDS(basins_inc_MIROC5_45, file="D:/ml with cdec uf/Intermediary Data/MIROC5_45_basinsdf.rds")
+saveRDS(basins_inc_HadGEM2ES_45, file="D:/ml with cdec uf/Intermediary Data/HadGEM2ES_45_basinsdf.rds")
+
+saveRDS(CanESM2_85_moddf, file="D:/ml with cdec uf/Intermediary Data/CanESM2_85_moddf.rds")
+saveRDS(CNRMCM5_85_moddf, file="D:/ml with cdec uf/Intermediary Data/CNRMCM5_85_moddf.rds")
+saveRDS(MIROC5_85_moddf, file="D:/ml with cdec uf/Intermediary Data/MIROC5_85_moddf.rds")
+saveRDS(HadGEM2ES_85_moddf, file="D:/ml with cdec uf/Intermediary Data/HadGEM2ES_85_moddf.rds")
+
+saveRDS(CanESM2_45_moddf, file="D:/ml with cdec uf/Intermediary Data/CanESM2_45_moddf.rds")
+saveRDS(CNRMCM5_45_moddf, file="D:/ml with cdec uf/Intermediary Data/CNRMCM5_45_moddf.rds")
+saveRDS(MIROC5_45_moddf, file="D:/ml with cdec uf/Intermediary Data/MIROC5_45_moddf.rds")
+saveRDS(HadGEM2ES_45_moddf, file="D:/ml with cdec uf/Intermediary Data/HadGEM2ES_45_moddf.rds")
+```
+
+
+
+
+

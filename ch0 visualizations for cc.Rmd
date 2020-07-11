@@ -1,0 +1,1338 @@
+---
+title: "visualizations"
+author: "Ellie White"
+date: "June 24, 2019"
+output: html_document
+---
+
+Visualizations of the climate change model data. 
+
+# Contents
+1.0 Regular Data   
+2.0 Functions   
+3.0 CEC Data: Historical  
+  3.1 Bring In the Data  
+  3.2 Plots for Annual   
+  3.3 Moving Average Plots  
+4.0 CEC Data: Climate Changed  
+  4.1 Bring In the Data    
+  4.2 Plots for Annual  
+  4.3 Moving Average   
+5.0 Modified Data  
+6.0 Plots  
+  6.1 Relative Percent Diff  
+
+```{r, include=FALSE}
+library(knitr)
+library(formatR)
+opts_chunk$set(fig.width = 7.5, fig.height = 7.5, collapse = TRUE, tidy = FALSE)
+```
+
+# Citations
+```{r citations} 
+# cite R 
+toBibtex(citation())
+
+# cite packages
+citethese <- c("zoo", "astsa", "ggplot2", "ggpmisc")
+for(i in seq_along(citethese)){
+  x <- citation(citethese[i])
+  print(toBibtex(x))
+}
+
+sessionInfo()
+```
+
+# 1.0 Regular Data
+```{r data_gathering}
+library(raster)
+library(sp)
+# some helpful dataframes, may come in handy later for post processing
+basins_points <- read.csv("inputdata/cdec_fnf_stations_data_minus_sfj_otr_bhn_ftm_sfr_sjm_klo.csv", stringsAsFactors = FALSE)
+coordinates(basins_points) <- ~LONGITUDE+LATITUDE
+proj4string(basins_points) <- CRS("+proj=longlat +datum=WGS84")
+
+basins <- readRDS("inputdata/basins.rds")
+cacounties <- readRDS("inputdata/counties.rds")
+
+ta <- CRS("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=km +ellps=GRS80")
+rasterproj <- CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0")
+
+basins_points <- spTransform(basins_points, rasterproj)
+basins <- spTransform(basins, rasterproj)
+cacounties <- spTransform(cacounties, rasterproj)
+```
+
+```{r visuals} 
+# colourblind palettes
+# ordered:     black      pink        orange     yellow     green       blue      darkorange  lightblue
+cbpgrey <-  c("#999999", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+cbpblack <- c("#000000", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+```
+
+# 2.0 Functions
+```{r funcs_to_import} 
+# library(hydroGOF) # this is giving wrong functions, do not load it in make sure the search path is clear
+goffuncs <- list.files("libraries/HydroGOFm/R")
+for(i in 1:length(goffuncs)){
+  source(paste0("libraries/HydroGOFm/R/", goffuncs[i]))
+}
+remove(goffuncs)
+
+search()
+```
+
+# 3.0 CEC Data: Historical
+
+## 3.1 Bring In the Data
+follow the links
+https://api.cal-adapt.org/api/
+https://api.cal-adapt.org/api/datasets/
+http://albers.cnr.berkeley.edu/data/scripps/livneh_vic-output/
+reference: "Pierce et al. (2018). Climate, drought, and sea level rise scenarios for California's fourth climate change assessment. California’s Fourth Climate Change Assessment, California Energy Commission. Publication Number: CNRA-CEC-2018-006."
+"url": "https://www.energy.ca.gov/sites/default/files/2019-07/Projections_CCCA4-CEC-2018-006.pdf"
+2008 is not working, went to cal-adapt API and downloaded that one file from: http://albers.cnr.berkeley.edu/data/scripps/livneh_vic-output/
+```{r cec_annual_historical} 
+# example raster
+prast1992 <- raster("inputdata/observed_data/CA_NV/precip/precip.1992.v0.CA_NV.nc")
+trast1992 <- raster("inputdata/observed_data/CA_NV/Tair/Tair.1992.v0.CA_NV.nc")
+rrast1992 <- raster("inputdata/observed_data/CA_NV/runoff/runoff.1992.v0.CA_NV.nc")
+
+# clip all rasters to this extent, all extents are the same for prast, trast and rrast
+ex <- extent(prast1992)
+time <- 1915:2015
+pnew <- tnew <- rnew <- list()
+for (i in seq_along(time)){
+  rastnew <- raster(paste0("inputdata/observed_data/CA_NV/precip/precip.", time[[i]], ".v0.CA_NV.nc"))
+  pnew[i] <- crop(rastnew, ex)
+  rastnew <- raster(paste0("inputdata/observed_data/CA_NV/Tair/Tair.", time[[i]], ".v0.CA_NV.nc"))
+  tnew[i] <- crop(rastnew, ex)
+  rastnew <- raster(paste0("inputdata/observed_data/CA_NV/runoff/runoff.", time[[i]], ".v0.CA_NV.nc"))
+  rnew[i] <- crop(rastnew, ex)
+}
+
+# make a stack from 1915-2015
+pstack <- do.call("stack", pnew)
+tstack <- do.call("stack", tnew)
+rstack <- do.call("stack", rnew)
+
+crs(pstack)
+yres(pstack)
+xres(pstack)
+nlayers(pstack) # has to be the 101 years of record we have
+# plot(pstack[[1:25]])
+
+library(rasterVis)
+# levelplot(pstack[[1:10]])
+# levelplot(tstack[[1:10]])
+# levelplot(rstack[[1:10]])
+```
+
+## 3.2 Plots for Annual Data
+```{r plotstack_gifstack_functions}
+library(RColorBrewer)
+library(colorspace)
+library(lattice)
+library(latticeExtra)
+library(grid)
+
+# type 1: "obs", "cc"
+# type 2: "normal", "rolling"
+plotstack <- function(stack, directory, type1, type2, stepsize, varname, xpos, ypos){
+  modelname <- deparse(substitute(stack))
+  dir.create(paste0(directory, modelname), showWarnings = FALSE)
+  minpoint <- min(cellStats(stack, stat="min", na.rm=TRUE))
+  maxpoint <- max(cellStats(stack, stat="max", na.rm=TRUE))
+  breakpoints <- seq(minpoint, maxpoint, stepsize)
+  # counties <- list("sp.polygons", cacounties, fill="transparent", col="white", first=FALSE)
+  if(varname=="precip"){
+    mycolors <- colorRampPalette(c(cbpblack[3], cbpblack[4], cbpblack[6]))
+    mycolors <- c("grey90", mycolors(length(breakpoints)))
+    mylabel <- "PPT\n(mm/day)"
+  } else if(varname=="Tair"){
+    mycolors <- colorRampPalette(c(cbpblack[6], cbpblack[4], cbpblack[3]))
+    mycolors <- mycolors(length(breakpoints))
+    mylabel <- "TMP\n(Deg C)"
+  } else if(varname=="runoff"){
+    mycolors <- colorRampPalette(c(cbpblack[3], cbpblack[4], cbpblack[6]))
+    mycolors <- c("grey90", mycolors(length(breakpoints)))
+    mylabel <- "Runoff\n(mm/day)"
+  } else {print("invalid variable name!")}
+  
+  ## rolling funcs look forward, so no need to do this
+  # if(type1=="obs"){
+  #   if(type2=="normal"){
+  #     startdate <- 1914
+  #   } else if(type2=="rolling"){
+  #     startdate <- 1924
+  #   } else {print("enter a valid type2!")}
+  # } else if (type1=="cc"){
+  #   if(type2=="normal"){
+  #     startdate <- 2014
+  #   } else if(type2=="rolling"){
+  #     startdate <- 2024
+  #   } else {print("enter a valid type2!")}
+  # } else {print("enter a valid type1")}
+  
+  if(type1=="obs"){
+      startdate <- 1914
+  } else if (type1=="cc"){
+      startdate <- 2014
+  } else {print("enter a valid type1")}
+  
+  if(type2=="normal"){
+    for(i in 1:nlayers(stack)){
+      png(paste0(directory, modelname,'/', startdate+i, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=900)
+      # par(mar=c(4,4,1,1)+0.1, ps=8, cex=1)
+      # plot(stack[[i]], main=1914+i, breaks=breakpoints, col=rev(terrain_hcl(length(breakpoints))))
+        par(mar=c(0,0,0,0)+0.1, cex=1)
+        tbdspplot <- spplot(stack[[i]], cex=0.8, col.regions=mycolors, main=list(label=startdate+i, cex=0.8), at = breakpoints,
+                        colorkey = list(
+                          right = list( # see ?levelplot in package trellis, argument colorkey:
+                            fun = draw.colorkey,
+                            args = list(
+                              key = list(
+                                at = seq(0, 1, 1/length(breakpoints)), # colour breaks
+                                col = mycolors, # colours
+                                labels = list(
+                                at = seq(0, 1, 2/length(breakpoints)),
+                                labels = breakpoints
+                                )
+                              )
+                            )
+                          )
+                        )
+                      ) + layer(sp.polygons(cacounties, lwd = 1, col="white"))
+      print(tbdspplot)
+      grid.text(mylabel, xpos, ypos, just="right")
+    dev.off()
+    }
+  }
+  if(type2=="rolling"){
+    for(i in 1:nlayers(stack)){
+      png(paste0(directory, modelname,'/', startdate+i, '.png'), width=3.25, height=2.85, units="in", pointsize=8, res=900) 
+        par(mar=c(0,0,0,0)+0.1, cex=1)
+        tbdspplot <- spplot(stack[[i]], cex=0.8, col.regions=mycolors, main=list(label=paste0(startdate+i, '-', startdate+10+i), cex=0.8), at = breakpoints,
+                        colorkey = list(
+                          right = list( # see ?levelplot in package trellis, argument colorkey:
+                            fun = draw.colorkey,
+                            args = list(
+                              key = list(
+                                at = seq(0, 1, 1/length(breakpoints)), # colour breaks
+                                col = mycolors, # colours
+                                labels = list(
+                                at = seq(0, 1, 2/length(breakpoints)),
+                                labels = breakpoints
+                                )
+                              )
+                            )
+                          )
+                        )
+                      ) + layer(sp.polygons(cacounties, lwd = 1, col="white"))
+      print(tbdspplot)
+      grid.text(mylabel, xpos, ypos, just="right")
+    dev.off()
+    }
+  }
+}
+
+library(magick)
+library(purrr)
+gifstack <- function(stack, directory){
+  modelname <- deparse(substitute(stack))
+  list.files(path = directory, pattern = "*.png", full.names = T) %>% 
+  map(image_read) %>% # reads each path file
+  image_join() %>% # joins image
+  image_animate(fps=2) %>% # animates, can opt for number of loops
+  image_write(paste0("ch5 climate change/outputdata/", modelname, ".gif"))
+}
+```
+
+```{r plotstack_gifstack_calcs} 
+# # stepsize is for the breaks in the color progression in the plot
+# # for precip
+# plotstack(pstack, 'ch5 climate change/outputdata/historical/', type1="obs", type2="normal", stepsize=10, varname= "precip", xpos=0.65, ypos=0.82)
+# gifstack(pstack, "ch5 climate change/outputdata/historical/pstack/")
+# 
+# # for air temp
+# plotstack(tstack, 'ch5 climate change/outputdata/historical/', type1="obs", type2="normal", stepsize=5, varname="Tair", xpos=0.65, ypos=0.82)
+# gifstack(tstack, "ch5 climate change/outputdata/historical/tstack/")
+# 
+# # for runoff
+# plotstack(rstack, 'ch5 climate change/outputdata/historical/', type1="obs", type2="normal", stepsize=10, varname="runoff", xpos=0.65, ypos=0.82)
+# gifstack(rstack, "ch5 climate change/outputdata/historical/rstack/")
+```
+
+## 3.3 Moving Average and Standard Deviation Plots
+```{r precip_rollmean}
+pmean <- stackApply(pstack, c(1*nlayers(pstack)), fun=mean, na.rm=TRUE)
+plot(pmean)
+psd <- stackApply(pstack, c(1*nlayers(pstack)), fun=sd, na.rm=TRUE)
+plot(psd)
+
+pmeanstack <- psdstack <- list()
+time <- 1915:(2015-30) 
+pstack3 <- pstack2 <- pstack
+for(i in seq_along(time)){
+  pmeanstack[i] <- stackApply(pstack2, rep(1, 30), fun=mean, na.rm=TRUE) # 30 year moving average
+  # remove the first layer and get the next 30 years of mean precip
+  pstack2 <- dropLayer(pstack2, c(1))
+  
+  psdstack[i] <- stackApply(pstack3, rep(1, 30), fun=sd, na.rm=TRUE) #30 year standard deviation
+  pstack3 <- dropLayer(pstack3, c(1))
+}
+
+pmeanstack <- do.call("stack", pmeanstack)
+psdstack <- do.call("stack", psdstack)
+
+remove(pstack2)
+remove(pstack3)
+
+# plot(pmeanstack)
+# nlayers(pmeanstack) # has to add up to the 71 layers of complete record
+# nlayers(pstack2) # check to see if there are the first 30 layers with incomplete record still left, so these layers go from 1945 (backward looking moving average) to 2015
+#
+# plot(psdstack)
+# nlayers(psdstack) 
+# nlayers(pstack3)
+# 
+# # plot side by side
+# par(mfrow=(c(1,2)))
+# plot(pmean, main="100 year mean")
+# plot(psd, main="100 year stdv")
+
+# plotstack(pmeanstack, directory='ch5 climate change/outputdata/historical/', type1="obs", type2="rolling", stepsize=1.25, varname="precip", xpos=0.65, ypos=0.82)
+# gifstack(pmeanstack, "ch5 climate change/outputdata/historical/pmeanstack/")
+# plotstack(psdstack, directory='ch5 climate change/outputdata/historical/', type1="obs", type2="rolling", stepsize=1.25, varname="precip", xpos=0.65, ypos=0.82)
+# gifstack(psdstack, "ch5 climate change/outputdata/historical/psdstack/")
+```
+
+# 4.0 CEC Data: Climate Changed
+4 priority models (HadGEM2-ES, CNRM-CM5, CanESM2, MIROC5). Do we want to use these?
+10 models selected by California’s Climate Action Team Research Working Group as having a good simulation of California's historical climate.
+
+## 4.1 Bring In the Data
+```{r cc_annual}
+# ccmodes recommended by D. Pierce for California
+ccmods <- c("CanESM2", "CNRM-CM5", "HadGEM2-ES", "MIROC5")
+
+# example
+prast2030 <- raster("inputdata/projected_data/CanESM2/rcp85/precip/precip.2030.v0.CA_NV.nc")
+
+vstackf <- function(ccmods, ccscenario, varofinterest){ 
+  ex <- extent(prast2030)
+  time <- 2015:2099
+  vnew <- list()
+  for(t in seq_along(time)){
+    rnew <- raster(paste0("inputdata/projected_data/", ccmods, "/", ccscenario, "/", varofinterest, "/", varofinterest, ".", time[[t]], ".v0.CA_NV.nc"))
+    vnew[t] <- crop(rnew, ex) 
+  }
+  vstackcc <- do.call("stack", vnew)
+}
+ 
+# annual precip 
+pstack_CanESM2_85 <- vstackf(ccmods[1], "rcp85", "precip")
+pstack_CNRMCM5_85 <- vstackf(ccmods[2], "rcp85", "precip")
+pstack_HadGEM2ES_85 <- vstackf(ccmods[3], "rcp85", "precip")
+pstack_MIROC5_85 <- vstackf(ccmods[4], "rcp85", "precip")
+
+pstack_CanESM2_45 <- vstackf(ccmods[1], "rcp45", "precip")
+pstack_CNRMCM5_45 <- vstackf(ccmods[2], "rcp45", "precip")
+pstack_HadGEM2ES_45 <- vstackf(ccmods[3], "rcp45", "precip")
+pstack_MIROC5_45 <- vstackf(ccmods[4], "rcp45", "precip")
+
+# annual Tair
+tstack_CanESM2_85 <- vstackf(ccmods[1], "rcp85", "Tair")
+tstack_CNRMCM5_85 <- vstackf(ccmods[2], "rcp85", "Tair")
+tstack_HadGEM2ES_85 <- vstackf(ccmods[3], "rcp85", "Tair")
+tstack_MIROC5_85 <- vstackf(ccmods[4], "rcp85", "Tair")
+
+tstack_CanESM2_45 <- vstackf(ccmods[1], "rcp45", "Tair")
+tstack_CNRMCM5_45 <- vstackf(ccmods[2], "rcp45", "Tair")
+tstack_HadGEM2ES_45 <- vstackf(ccmods[3], "rcp45", "Tair")
+tstack_MIROC5_45 <- vstackf(ccmods[4], "rcp45", "Tair")
+
+# annual runoff
+rstack_CanESM2_85 <- vstackf(ccmods[1], "rcp85", "runoff")
+rstack_CNRMCM5_85 <- vstackf(ccmods[2], "rcp85", "runoff")
+rstack_HadGEM2ES_85 <- vstackf(ccmods[3], "rcp85", "runoff")
+rstack_MIROC5_85 <- vstackf(ccmods[4], "rcp85", "runoff")
+
+rstack_CanESM2_45 <- vstackf(ccmods[1], "rcp45", "runoff")
+rstack_CNRMCM5_45 <- vstackf(ccmods[2], "rcp45", "runoff")
+rstack_HadGEM2ES_45 <- vstackf(ccmods[3], "rcp45", "runoff")
+rstack_MIROC5_45 <- vstackf(ccmods[4], "rcp45", "runoff")
+```
+
+```{r cc_monthly}
+# not using this for plotting purposes, use annual data
+# dir_list <- read.table(textConnection(getURLContent("https://api.cal-adapt.org/api/series/tasmax_year_CNRM-CM5_rcp45/rasters/")), sep = "", strip.white = TRUE)
+# 
+# pmrast2006 <- raster("inputdata/projected_data_monthly/CanESM2/rcp85/Rainfall/Rainfall_month_CanESM2_rcp85_2006-01.v0.CA_NV.tif")
+# 
+# vstackf_monthly <- function(ccmods, varofinterest, ccscenario="rcp85"){
+#   filelists <- list.files(paste0("inputdata/projected_data_monthly/", ccmods, "/", ccscenario, "/", varofinterest, "/"), pattern = "*.tif$")
+#   stackcc <- raster::stack(paste0("inputdata/projected_data_monthly/", ccmods, "/", ccscenario, "/", varofinterest, "/", filelists))
+# }
+  
+# # monnthly rainfall
+# pmstack_CanESM2_85 <- vstackf_monthly(ccmods[1], "rainfall", ccscenario="rcp85")
+# pmstack_CNRMCM5_85 <- vstackf_monthly(ccmods[2], "rainfall", ccscenario="rcp85")
+# pmstack_HadGEM2ES_85 <- vstackf_monthly(ccmods[3], "rainfall", ccscenario="rcp85")
+# pmstack_MIROC5_85 <- vstackf_monthly(ccmods[4], "rainfall", ccscenario="rcp85")
+# 
+# pmstack_CanESM2_45 <- vstackf_monthly(ccmods[1], "rainfall", ccscenario="rcp45")
+# pmstack_CNRMCM5_45 <- vstackf_monthly(ccmods[2], "rainfall", ccscenario="rcp45")
+# pmstack_HadGEM2ES_45 <- vstackf_monthly(ccmods[3], "rainfall", ccscenario="rcp45")
+# pmstack_MIROC5_45 <- vstackf_monthly(ccmods[4], "rainfall", ccscenario="rcp45")
+# 
+# # monthly Tair
+# tmstack_CanESM2_85 <- vstackf_monthly(ccmods[1], "Tair", ccscenario="rcp85")
+# tmstack_CNRMCM5_85 <- vstackf_monthly(ccmods[2], "Tair", ccscenario="rcp85")
+# tmstack_HadGEM2ES_85 <- vstackf_monthly(ccmods[3], "Tair", ccscenario="rcp85")
+# tmstack_MIROC5_85 <- vstackf_monthly(ccmods[4], "Tair", ccscenario="rcp85")
+# 
+# tmstack_CanESM2_45 <- vstackf_monthly(ccmods[1], "Tair", ccscenario="rcp45")
+# tmstack_CNRMCM5_45 <- vstackf_monthly(ccmods[2], "Tair", ccscenario="rcp45")
+# tmstack_HadGEM2ES_45 <- vstackf_monthly(ccmods[3], "Tair", ccscenario="rcp45")
+# tmstack_MIROC5_45 <- vstackf_monthly(ccmods[4], "Tair", ccscenario="rcp45")
+# 
+# # monthly runoff
+# rmstack_CanESM2_85 <- vstackf_monthly(ccmods[1], "runoff", ccscenario="rcp85")
+# rmstack_CNRMCM5_85 <- vstackf_monthly(ccmods[2], "runoff", ccscenario="rcp85")
+# rmstack_HadGEM2ES_85 <- vstackf_monthly(ccmods[3], "runoff", ccscenario="rcp85")
+# rmstack_MIROC5_85 <- vstackf_monthly(ccmods[4], "runoff", ccscenario="rcp85")
+# 
+# rmstack_CanESM2_45 <- vstackf_monthly(ccmods[1], "runoff", ccscenario="rcp45")
+# rmstack_CNRMCM5_45 <- vstackf_monthly(ccmods[2], "runoff", ccscenario="rcp45")
+# rmstack_HadGEM2ES_45 <- vstackf_monthly(ccmods[3], "runoff", ccscenario="rcp45")
+# rmstack_MIROC5_45 <- vstackf_monthly(ccmods[4], "runoff", ccscenario="rcp45")
+```
+
+## 4.2 Plots for Annual Data
+```{r cc_precip_plotstack_gifstack_calcs} 
+# plotstack(pstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# 
+# plotstack(pstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+# plotstack(pstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="normal", stepsize=10, varname="precip", xpos=0.65, ypos=0.82)
+
+# gifstack(pstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/pstack_CanESM2')
+# gifstack(pstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/pstack_CNRMCM5')
+# gifstack(pstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEMES/pstack_HadGEM2ES')
+# gifstack(pstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/pstack_MIROC5')
+
+# gifstack(pstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/pstack_CanESM2')
+# gifstack(pstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/pstack_CNRMCM5')
+# gifstack(pstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEMES/pstack_HadGEM2ES')
+# gifstack(pstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/pstack_MIROC5')
+```
+
+## 4.3 Moving Average and Standard Deviation for Annual Data
+```{r cc_roll_functions}
+# n is the number of years to be rolling
+
+rollmean_cc <- function(pstack, n){
+  pmeanstack <- list()
+  time <- 2015:(2099-n) 
+  for(i in seq_along(time)){
+    pmeanstack[i] <- stackApply(pstack, rep(1,n), fun=mean, na.rm=TRUE) #10 year moving average
+    #now remove the first layer and get the next 10 years of mean precip
+    pstack <- dropLayer(pstack, c(1))
+  }
+  pmeanstack <- do.call("stack", pmeanstack)
+}
+
+rollsd_cc <- function(pstack, n){
+  psdstack <- list()
+  time <- 2015:(2099-n)
+  for(i in seq_along(time)){
+    # psdstack[i]<- sd(pstack[[i:(29+i)]], na.rm=TRUE) # no need to droplayer with this method
+    psdstack[i] <- stackApply(pstack, rep(1,n), fun=sd, na.rm=TRUE) # n year moving average
+    #now remove the first layer and get the next 30 years of mean precip
+    pstack <- dropLayer(pstack, c(1))
+  }
+  psdstack <- do.call("stack", psdstack)
+}
+
+nyearsrolling <- 10
+pmeanstack_CanESM2_85 <- rollmean_cc(pstack_CanESM2_85, nyearsrolling)
+psdstack_CanESM2_85 <- rollsd_cc(pstack_CanESM2_85, nyearsrolling)
+pmeanstack_CNRMCM5_85 <- rollmean_cc(pstack_CNRMCM5_85, nyearsrolling)
+psdstack_CNRMCM5_85 <- rollsd_cc(pstack_CNRMCM5_85, nyearsrolling)
+pmeanstack_HadGEM2ES_85 <- rollmean_cc(pstack_HadGEM2ES_85, nyearsrolling)
+psdstack_HadGEM2ES_85 <- rollsd_cc(pstack_HadGEM2ES_85, nyearsrolling)
+pmeanstack_MIROC5_85 <- rollmean_cc(pstack_MIROC5_85, nyearsrolling)
+psdstack_MIROC5_85 <- rollsd_cc(pstack_MIROC5_85, nyearsrolling)
+
+pmeanstack_CanESM2_45 <- rollmean_cc(pstack_CanESM2_45, nyearsrolling)
+psdstack_CanESM2_45 <- rollsd_cc(pstack_CanESM2_45, nyearsrolling)
+pmeanstack_CNRMCM5_45 <- rollmean_cc(pstack_CNRMCM5_45, nyearsrolling)
+psdstack_CNRMCM5_45 <- rollsd_cc(pstack_CNRMCM5_45, nyearsrolling)
+pmeanstack_HadGEM2ES_45 <- rollmean_cc(pstack_HadGEM2ES_45, nyearsrolling)
+psdstack_HadGEM2ES_45 <- rollsd_cc(pstack_HadGEM2ES_45, nyearsrolling)
+pmeanstack_MIROC5_45 <- rollmean_cc(pstack_MIROC5_45, nyearsrolling)
+psdstack_MIROC5_45 <- rollsd_cc(pstack_MIROC5_45, nyearsrolling)
+
+# TMP
+tmeanstack_CanESM2_85 <- rollmean_cc(tstack_CanESM2_85, nyearsrolling)
+tsdstack_CanESM2_85 <- rollsd_cc(tstack_CanESM2_85, nyearsrolling)
+tmeanstack_CNRMCM5_85 <- rollmean_cc(tstack_CNRMCM5_85, nyearsrolling)
+tsdstack_CNRMCM5_85 <- rollsd_cc(tstack_CNRMCM5_85, nyearsrolling)
+tmeanstack_HadGEM2ES_85 <- rollmean_cc(tstack_HadGEM2ES_85, nyearsrolling)
+tsdstack_HadGEM2ES_85 <- rollsd_cc(tstack_HadGEM2ES_85, nyearsrolling)
+tmeanstack_MIROC5_85 <- rollmean_cc(tstack_MIROC5_85, nyearsrolling)
+tsdstack_MIROC5_85 <- rollsd_cc(tstack_MIROC5_85, nyearsrolling)
+
+tmeanstack_CanESM2_45 <- rollmean_cc(tstack_CanESM2_45, nyearsrolling)
+tsdstack_CanESM2_45 <- rollsd_cc(tstack_CanESM2_45, nyearsrolling)
+tmeanstack_CNRMCM5_45 <- rollmean_cc(tstack_CNRMCM5_45, nyearsrolling)
+tsdstack_CNRMCM5_45 <- rollsd_cc(tstack_CNRMCM5_45, nyearsrolling)
+tmeanstack_HadGEM2ES_45 <- rollmean_cc(tstack_HadGEM2ES_45, nyearsrolling)
+tsdstack_HadGEM2ES_45 <- rollsd_cc(tstack_HadGEM2ES_45, nyearsrolling)
+tmeanstack_MIROC5_45 <- rollmean_cc(tstack_MIROC5_45, nyearsrolling)
+tsdstack_MIROC5_45 <- rollsd_cc(tstack_MIROC5_45, nyearsrolling)
+
+# RNF
+rmeanstack_CanESM2_85 <- rollmean_cc(rstack_CanESM2_85, nyearsrolling)
+rsdstack_CanESM2_85 <- rollsd_cc(rstack_CanESM2_85, nyearsrolling)
+rmeanstack_CNRMCM5_85 <- rollmean_cc(rstack_CNRMCM5_85, nyearsrolling)
+rsdstack_CNRMCM5_85 <- rollsd_cc(rstack_CNRMCM5_85, nyearsrolling)
+rmeanstack_HadGEM2ES_85 <- rollmean_cc(rstack_HadGEM2ES_85, nyearsrolling)
+rsdstack_HadGEM2ES_85 <- rollsd_cc(rstack_HadGEM2ES_85, nyearsrolling)
+rmeanstack_MIROC5_85 <- rollmean_cc(rstack_MIROC5_85, nyearsrolling)
+rsdstack_MIROC5_85 <- rollsd_cc(rstack_MIROC5_85, nyearsrolling)
+
+rmeanstack_CanESM2_45 <- rollmean_cc(rstack_CanESM2_45, nyearsrolling)
+rsdstack_CanESM2_45 <- rollsd_cc(rstack_CanESM2_45, nyearsrolling)
+rmeanstack_CNRMCM5_45 <- rollmean_cc(rstack_CNRMCM5_45, nyearsrolling)
+rsdstack_CNRMCM5_45 <- rollsd_cc(rstack_CNRMCM5_45, nyearsrolling)
+rmeanstack_HadGEM2ES_45 <- rollmean_cc(rstack_HadGEM2ES_45, nyearsrolling)
+rsdstack_HadGEM2ES_45 <- rollsd_cc(rstack_HadGEM2ES_45, nyearsrolling)
+rmeanstack_MIROC5_45 <- rollmean_cc(rstack_MIROC5_45, nyearsrolling)
+rsdstack_MIROC5_45 <- rollsd_cc(rstack_MIROC5_45, nyearsrolling)
+```
+
+```{r meanmeanstack_meansdstack}
+# # find the mean in time for the rolling means
+# pmeanmean_CanESM2_45 <- stackApply(pmeanstack_CanESM2_45, rep(1, nlayers(pmeanstack_CanESM2_45)), fun=mean, na.rm=TRUE)
+```
+
+```{r cc_roll_plotstack_85} 
+# make sure nyears rolling and the hardcoded label in plotstack function is correct
+# if you need it use: detach("package:ggplot2", unload=TRUE). It is messing with the layer function in latticeExtra
+# # PPT
+# plotstack(pmeanstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# 
+# plotstack(psdstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# 
+# # TMP
+# plotstack(tmeanstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# 
+# plotstack(tsdstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# 
+# # RNF
+# plotstack(rmeanstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# 
+# plotstack(rsdstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+```
+
+```{r cc_roll_plotstack_45} 
+# # PPT
+# plotstack(pmeanstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(pmeanstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "precip", xpos=0.65, ypos=0.82)
+# 
+# plotstack(psdstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# plotstack(psdstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=5, varname= "precip", xpos=0.65, ypos=0.82)
+# 
+# # TMP
+# plotstack(tmeanstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tmeanstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# 
+# plotstack(tsdstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# plotstack(tsdstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=0.5, varname= "Tair", xpos=0.65, ypos=0.82)
+# 
+# # RNF
+# plotstack(rmeanstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rmeanstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=2.5, varname= "runoff", xpos=0.65, ypos=0.82)
+# 
+# plotstack(rsdstack_CanESM2_45, directory='ch5 climate change/outputdata/projected/CanESM2/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_CNRMCM5_45, directory='ch5 climate change/outputdata/projected/CNRMCM5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_HadGEM2ES_45, directory='ch5 climate change/outputdata/projected/HadGEM2ES/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+# plotstack(rsdstack_MIROC5_45, directory='ch5 climate change/outputdata/projected/MIROC5/', type1="cc", type2="rolling", stepsize=5, varname= "runoff", xpos=0.65, ypos=0.82)
+```
+
+```{r cc_roll_gifstack} 
+# gifstack(pmeanstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/pmeanstack_CanESM2_85')
+# gifstack(pmeanstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/pmeanstack_CNRMCM5_85')
+# gifstack(pmeanstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEMES/pmeanstack_HadGEM2ES_85')
+# gifstack(pmeanstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/MIROC5/pmeanstack_MIROC5_85')
+# 
+# # run these later
+# gifstack(psdstack_CanESM2_85, directory='ch5 climate change/outputdata/projected/CanESM2/psdstack_CanESM2_85')
+# gifstack(psdstack_CNRMCM5_85, directory='ch5 climate change/outputdata/projected/CNRMCM5/psdstack_CNRMCM5_85')
+# gifstack(psdstack_HadGEM2ES_85, directory='ch5 climate change/outputdata/projected/HadGEMES/psdstack_HadGEM2ES_85')
+# gifstack(psdstack_MIROC5_85, directory='ch5 climate change/outputdata/projected/GFDLCM3/psdstack_MIROC5_85')
+```
+
+```{r cc_roll_collappsed}
+# plot spatial mean of the 10 year rolling sdandard deviation and spatial mean of the 10 year rolling mean vs. time 
+# only for California
+spatialmeanrolling <- function(pstack, tstack, rstack){ 
+  modelname <- deparse(substitute(pstack))
+  ccmodname <- gsub('.*_(.*)_(.*)','\\1', modelname)
+  rcpname <- gsub('.*_(.*)','\\1', modelname)
+  rcp_first <- substring(rcpname, 1, 1)
+  rcp_last <- substring(rcpname, 2, 2)
+  prettymodname <- paste0(ccmodname, " RCP ", rcp_first, ".", rcp_last)
+  
+  pspmean <- c()
+  for(i in 1:nlayers(pstack)){
+    raster_clipped <- mask(pstack[[i]], cacounties)
+    pspmean[i] <- cellStats(raster_clipped, stat="mean")
+    
+  }
+  pspmeandf <- data.frame(pspmean, STARTROLLYEAR=c(2015:(2014 + nlayers(pstack))))
+  colnames(pspmeandf)[1] <- "PPT"
+  
+  tspmean <- c()
+  for(i in 1:nlayers(tstack)){
+    raster_clipped <- mask(tstack[[i]], cacounties)
+    tspmean[i] <- cellStats(raster_clipped, stat="mean")
+  }
+  tspmeandf <- data.frame(tspmean, STARTROLLYEAR=c(2015:(2014 + nlayers(tstack))))
+  colnames(tspmeandf)[1] <- "TMP"
+  
+  rspmean <- c()
+  for(i in 1:nlayers(rstack)){
+    raster_clipped <- mask(rstack[[i]], cacounties)
+    rspmean[i] <- cellStats(raster_clipped, stat="mean")
+  }
+  rspmeandf <- data.frame(rspmean, STARTROLLYEAR=c(2015:(2014 + nlayers(rstack))))
+  colnames(rspmeandf)[1] <- "RNF"
+  
+  spmean <- merge(pspmeandf, tspmeandf, by="STARTROLLYEAR")
+  spmean <- merge(spmean, rspmeandf, by="STARTROLLYEAR")
+  spmean$CCMOD <- ccmodname
+  spmean$RCP <- rcpname
+  spmean$PRETTYLABEL <- prettymodname
+  spmean
+}
+
+sp_mean_mean_CanESM2_85 <- spatialmeanrolling(pmeanstack_CanESM2_85, tmeanstack_CanESM2_85, rmeanstack_CanESM2_85)
+sp_mean_sd_CanESM2_85 <- spatialmeanrolling(psdstack_CanESM2_85, tsdstack_CanESM2_85, rsdstack_CanESM2_85)
+sp_mean_mean_CNRMCM5_85 <- spatialmeanrolling(pmeanstack_CNRMCM5_85, tmeanstack_CNRMCM5_85, rmeanstack_CNRMCM5_85)
+sp_mean_sd_CNRMCM5_85 <- spatialmeanrolling(psdstack_CNRMCM5_85, tsdstack_CNRMCM5_85, rsdstack_CNRMCM5_85)
+sp_mean_mean_HadGEM2ES_85 <- spatialmeanrolling(pmeanstack_HadGEM2ES_85, tmeanstack_HadGEM2ES_85, rmeanstack_HadGEM2ES_85)
+sp_mean_sd_HadGEM2ES_85 <- spatialmeanrolling(psdstack_HadGEM2ES_85, tsdstack_HadGEM2ES_85, rsdstack_HadGEM2ES_85)
+sp_mean_mean_MIROC5_85 <- spatialmeanrolling(pmeanstack_MIROC5_85, tmeanstack_MIROC5_85, rmeanstack_MIROC5_85)
+sp_mean_sd_MIROC5_85 <- spatialmeanrolling(psdstack_MIROC5_85, tsdstack_MIROC5_85, rsdstack_MIROC5_85)
+
+sp_mean_mean_CanESM2_45 <- spatialmeanrolling(pmeanstack_CanESM2_45, tmeanstack_CanESM2_45, rmeanstack_CanESM2_45)
+sp_mean_sd_CanESM2_45 <- spatialmeanrolling(psdstack_CanESM2_45, tsdstack_CanESM2_45, rsdstack_CanESM2_45)
+sp_mean_mean_CNRMCM5_45 <- spatialmeanrolling(pmeanstack_CNRMCM5_45, tmeanstack_CNRMCM5_45, rmeanstack_CNRMCM5_45)
+sp_mean_sd_CNRMCM5_45 <- spatialmeanrolling(psdstack_CNRMCM5_45, tsdstack_CNRMCM5_45, rsdstack_CNRMCM5_45)
+sp_mean_mean_HadGEM2ES_45 <- spatialmeanrolling(pmeanstack_HadGEM2ES_45, tmeanstack_HadGEM2ES_45, rmeanstack_HadGEM2ES_45)
+sp_mean_sd_HadGEM2ES_45 <- spatialmeanrolling(psdstack_HadGEM2ES_45, tsdstack_HadGEM2ES_45, rsdstack_HadGEM2ES_45)
+sp_mean_mean_MIROC5_45 <- spatialmeanrolling(pmeanstack_MIROC5_45, tmeanstack_MIROC5_45, rmeanstack_MIROC5_45)
+sp_mean_sd_MIROC5_45 <- spatialmeanrolling(psdstack_MIROC5_45, tsdstack_MIROC5_45, rsdstack_MIROC5_45)
+
+sp_mean_mean_all <- rbind(sp_mean_mean_CanESM2_85, sp_mean_mean_CNRMCM5_85, sp_mean_mean_HadGEM2ES_85, sp_mean_mean_MIROC5_85, sp_mean_mean_CanESM2_45, sp_mean_mean_CNRMCM5_45, sp_mean_mean_HadGEM2ES_45, sp_mean_mean_MIROC5_45)
+sp_mean_sd_all <- rbind(sp_mean_sd_CanESM2_85, sp_mean_sd_CNRMCM5_85, sp_mean_sd_HadGEM2ES_85, sp_mean_sd_MIROC5_85, sp_mean_sd_CanESM2_45, sp_mean_sd_CNRMCM5_45, sp_mean_sd_HadGEM2ES_45, sp_mean_sd_MIROC5_45)
+```
+
+```{r cc_roll_collappsed_plots}
+library(ggplot2)
+library(ggpubr)
+
+pptplot <- ggplot(sp_mean_mean_all, aes(x=STARTROLLYEAR, y=PPT, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend=FALSE)+
+    xlab("")+
+    ylab("Mean 10 yr Rolling\nPrecipitation (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+tmpplot <- ggplot(sp_mean_mean_all, aes(x=STARTROLLYEAR, y=TMP, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend=FALSE)+
+    xlab("")+
+    ylab("Mean 10 yr Rolling\nAir Temperature (Deg C)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+rnfplot <- ggplot(sp_mean_mean_all, aes(x=STARTROLLYEAR, y=RNF, col=CCMOD, linetype=RCP))+
+    geom_line()+
+    xlab("")+
+    ylab("Mean 10 yr Rolling\nUnrouted Runoff (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+
+png('ch5 climate change/outputdata/rplot57_rollmean_all.png', width=6.5, height=6.5, units="in", pointsize=8, res=900)
+  ggarrange(pptplot, tmpplot, rnfplot, ncol=1) 
+dev.off()
+
+pptplot <- ggplot(sp_mean_sd_all, aes(x=STARTROLLYEAR, y=PPT, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend = FALSE)+
+    xlab("")+
+    ylab("Mean Standard Deviation\nof 10 yr Rolling\nPrecipitation (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+tmpplot <- ggplot(sp_mean_sd_all, aes(x=STARTROLLYEAR, y=TMP, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend = FALSE)+
+    xlab("")+
+    ylab("Mean Standard Deviation\nof 10 yr Rolling\nAir Temperature (Deg C)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+rnfplot <- ggplot(sp_mean_sd_all, aes(x=STARTROLLYEAR, y=RNF, col=CCMOD, linetype=RCP))+
+    geom_line()+
+    xlab("")+
+    ylab("Mean Standard Deviation\nof 10 yr Rolling\nUnrouted Runoff (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+
+png('ch5 climate change/outputdata/rplot57_rollsd_all.png', width=6.5, height=6.5, units="in", pointsize=8, res=900)
+  ggarrange(pptplot, tmpplot, rnfplot, ncol=1) 
+dev.off()
+```
+
+# 5.0 Modified Data
+```{r data_gathering_cc} 
+# not plotting anything with these yet, may not need them
+CanESM2_85_df <- readRDS('inputdata/CanESM2_85_moddf.rds')
+CNRMCM5_85_df <- readRDS('inputdata/CNRMCM5_85_moddf.rds')
+HadGEM2ES_85_df <- readRDS('inputdata/HadGEM2ES_85_moddf.rds')
+MIROC5_85_df <- readRDS('inputdata/MIROC5_85_moddf.rds')
+
+CanESM2_45_df <- readRDS('inputdata/CanESM2_45_moddf.rds')
+CNRMCM5_45_df <- readRDS('inputdata/CNRMCM5_45_moddf.rds')
+HadGEM2ES_45_df <- readRDS('inputdata/HadGEM2ES_45_moddf.rds')
+MIROC5_45_df <- readRDS('inputdata/MIROC5_45_moddf.rds')
+
+preprocess_data <- function(df){
+  # remove DOMGEOLOGY cause it's causing problems
+  df <- df[ , !(colnames(df) %in% c("DOMGEOLOGY"))]
+  
+  # order by baisn name
+  df <- df[order(df$CDEC_ID), ]
+  row.names(df) <- 1:nrow(df)
+  
+  return(df)
+  # # get rid of negative flows, as of now there are no flows in the dataset 
+  # moddf <- df[df$FLOW>=0, ]
+}
+
+CanESM2_85_moddf <- preprocess_data(CanESM2_85_df)
+CNRMCM5_85_moddf <- preprocess_data(CNRMCM5_85_df)
+HadGEM2ES_85_moddf <- preprocess_data(HadGEM2ES_85_df)
+MIROC5_85_moddf <- preprocess_data(MIROC5_85_df)
+
+CanESM2_45_moddf <- preprocess_data(CanESM2_45_df)
+CNRMCM5_45_moddf <- preprocess_data(CNRMCM5_45_df)
+HadGEM2ES_45_moddf <- preprocess_data(HadGEM2ES_45_df)
+MIROC5_45_moddf <- preprocess_data(MIROC5_45_df)
+
+# # check if all the negatives are gone from moddf, as of now there are no flows
+# tbd <- HadGEM2ES_85_moddf[HadGEM2ES_85_moddf$FLOW<0, "FLOW"]
+# tbd <- na.omit(tbd)
+# length(tbd) == 0
+# remove(tbd)
+
+# split into two one original aggregate basins and one the incremental basins
+split_agg <- function(moddf){
+  name_inc <- substr(moddf$CDEC_ID, 5,7)
+  name_has_inc <- ifelse(name_inc=="",0,1)
+  df_inc <- moddf[which(name_has_inc==1),]
+  df_agg <- moddf[which(name_has_inc==0),]
+  
+  # get rid of na values 
+  df_agg <- na.omit(df_agg)
+  df_inc <- na.omit(df_inc)
+  
+  # order 
+  df_agg <- df_agg[order(df_agg[, "CDEC_ID"], df_agg[, "DATE"]), ]
+  
+  # just return the agg for now
+  return(df_agg)
+}
+
+CanESM2_85_moddf <- split_agg(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- split_agg(CNRMCM5_85_moddf)
+MIROC5_85_moddf <- split_agg(MIROC5_85_moddf)
+HadGEM2ES_85_moddf <- split_agg(HadGEM2ES_85_moddf)
+
+CanESM2_45_moddf <- split_agg(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- split_agg(CNRMCM5_45_moddf)
+MIROC5_45_moddf <- split_agg(MIROC5_45_moddf)
+HadGEM2ES_45_moddf <- split_agg(HadGEM2ES_45_moddf)
+```
+
+# 6.0 Plots
+
+## 6.1 Relative Percent Diff
+```{r relative_percent_diff_rasterss} 
+# % change in mean annual ppt tmp runoff rasters between obs and projected, by CCMOD and RCP 
+ca_pmean <- stackApply(pstack, rep(1, nlayers(pstack)), fun=mean, na.rm=TRUE)
+ca_tmean <- stackApply(tstack, rep(1, nlayers(tstack)), fun=mean, na.rm=TRUE)
+ca_rmean <- stackApply(rstack, rep(1, nlayers(rstack)), fun=mean, na.rm=TRUE)
+
+pmean_CanESM2_85 <- stackApply(pstack_CanESM2_85, rep(1, nlayers(pstack_CanESM2_85)), fun=mean, na.rm=TRUE)
+pmean_CNRMCM5_85 <- stackApply(pstack_CNRMCM5_85, rep(1, nlayers(pstack_CNRMCM5_85)), fun=mean, na.rm=TRUE)
+pmean_HadGEM2ES_85 <- stackApply(pstack_HadGEM2ES_85, rep(1, nlayers(pstack_HadGEM2ES_85)), fun=mean, na.rm=TRUE)
+pmean_MIROC5_85 <- stackApply(pstack_MIROC5_85, rep(1, nlayers(pstack_MIROC5_85)), fun=mean, na.rm=TRUE)
+pmean_CanESM2_45 <- stackApply(pstack_CanESM2_45, rep(1, nlayers(pstack_CanESM2_45)), fun=mean, na.rm=TRUE)
+pmean_CNRMCM5_45 <- stackApply(pstack_CNRMCM5_45, rep(1, nlayers(pstack_CNRMCM5_45)), fun=mean, na.rm=TRUE)
+pmean_HadGEM2ES_45 <- stackApply(pstack_HadGEM2ES_45, rep(1, nlayers(pstack_HadGEM2ES_45)), fun=mean, na.rm=TRUE)
+pmean_MIROC5_45 <- stackApply(pstack_MIROC5_45, rep(1, nlayers(pstack_MIROC5_45)), fun=mean, na.rm=TRUE)
+
+tmean_CanESM2_85 <- stackApply(tstack_CanESM2_85, rep(1, nlayers(tstack_CanESM2_85)), fun=mean, na.rm=TRUE)
+tmean_CNRMCM5_85 <- stackApply(tstack_CNRMCM5_85, rep(1, nlayers(tstack_CNRMCM5_85)), fun=mean, na.rm=TRUE)
+tmean_HadGEM2ES_85 <- stackApply(tstack_HadGEM2ES_85, rep(1, nlayers(tstack_HadGEM2ES_85)), fun=mean, na.rm=TRUE)
+tmean_MIROC5_85 <- stackApply(tstack_MIROC5_85, rep(1, nlayers(tstack_MIROC5_85)), fun=mean, na.rm=TRUE)
+tmean_CanESM2_45 <- stackApply(tstack_CanESM2_45, rep(1, nlayers(tstack_CanESM2_45)), fun=mean, na.rm=TRUE)
+tmean_CNRMCM5_45 <- stackApply(tstack_CNRMCM5_45, rep(1, nlayers(tstack_CNRMCM5_45)), fun=mean, na.rm=TRUE)
+tmean_HadGEM2ES_45 <- stackApply(tstack_HadGEM2ES_45, rep(1, nlayers(tstack_HadGEM2ES_45)), fun=mean, na.rm=TRUE)
+tmean_MIROC5_45 <- stackApply(tstack_MIROC5_45, rep(1, nlayers(tstack_MIROC5_45)), fun=mean, na.rm=TRUE)
+
+rmean_CanESM2_85 <- stackApply(rstack_CanESM2_85, rep(1, nlayers(rstack_CanESM2_85)), fun=mean, na.rm=TRUE)
+rmean_CNRMCM5_85 <- stackApply(rstack_CNRMCM5_85, rep(1, nlayers(rstack_CNRMCM5_85)), fun=mean, na.rm=TRUE)
+rmean_HadGEM2ES_85 <- stackApply(rstack_HadGEM2ES_85, rep(1, nlayers(rstack_HadGEM2ES_85)), fun=mean, na.rm=TRUE)
+rmean_MIROC5_85 <- stackApply(rstack_MIROC5_85, rep(1, nlayers(rstack_MIROC5_85)), fun=mean, na.rm=TRUE)
+rmean_CanESM2_45 <- stackApply(rstack_CanESM2_45, rep(1, nlayers(rstack_CanESM2_45)), fun=mean, na.rm=TRUE)
+rmean_CNRMCM5_45 <- stackApply(rstack_CNRMCM5_45, rep(1, nlayers(rstack_CNRMCM5_45)), fun=mean, na.rm=TRUE)
+rmean_HadGEM2ES_45 <- stackApply(rstack_HadGEM2ES_45, rep(1, nlayers(rstack_HadGEM2ES_45)), fun=mean, na.rm=TRUE)
+rmean_MIROC5_45 <- stackApply(tstack_MIROC5_45, rep(1, nlayers(tstack_MIROC5_45)), fun=mean, na.rm=TRUE)
+
+rpd_f <- function(x, y){
+  rpd <- 2*(x-y)/(abs(x)+abs(y))*100
+}
+
+# pminpoint <- min(cellStats(rpd_f(pmean_CanESM2_85, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CNRMCM5_85, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_HadGEM2ES_85, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_MIROC5_85, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CanESM2_45, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CNRMCM5_45, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_HadGEM2ES_45, ca_pmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_MIROC5_45, ca_pmean), stat="min", na.rm=TRUE))
+# 
+# pmaxpoint <- max(cellStats(rpd_f(pmean_CanESM2_85, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CNRMCM5_85, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_HadGEM2ES_85, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_MIROC5_85, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CanESM2_45, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_CNRMCM5_45, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_HadGEM2ES_45, ca_pmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(pmean_MIROC5_45, ca_pmean), stat="max", na.rm=TRUE)) 
+# 
+# tminpoint <- min(cellStats(rpd_f(tmean_CanESM2_85, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CNRMCM5_85, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_HadGEM2ES_85, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_MIROC5_85, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CanESM2_45, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CNRMCM5_45, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_HadGEM2ES_45, ca_tmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_MIROC5_45, ca_tmean), stat="min", na.rm=TRUE))
+# 
+# tmaxpoint <- max(cellStats(rpd_f(tmean_CanESM2_85, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CNRMCM5_85, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_HadGEM2ES_85, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_MIROC5_85, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CanESM2_45, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_CNRMCM5_45, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_HadGEM2ES_45, ca_tmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(tmean_MIROC5_45, ca_tmean), stat="max", na.rm=TRUE)) 
+# 
+# rminpoint <- min(cellStats(rpd_f(rmean_CanESM2_85, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CNRMCM5_85, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_HadGEM2ES_85, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_MIROC5_85, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CanESM2_45, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CNRMCM5_45, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_HadGEM2ES_45, ca_rmean), stat="min", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_MIROC5_45, ca_rmean), stat="min", na.rm=TRUE))
+# 
+# rmaxpoint <- max(cellStats(rpd_f(rmean_CanESM2_85, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CNRMCM5_85, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_HadGEM2ES_85, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_MIROC5_85, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CanESM2_45, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_CNRMCM5_45, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_HadGEM2ES_45, ca_rmean), stat="max", na.rm=TRUE),
+#                 cellStats(rpd_f(rmean_MIROC5_45, ca_rmean), stat="max", na.rm=TRUE)) 
+
+library(plyr) # use for rounding nicely in seq()
+# # check rounding
+# round_any(min(pminpoint), 1, f = floor)
+# round_any(max(pmaxpoint), 1, f = ceiling)
+
+library(latticeExtra) # for layer function
+library(raster) # for layer to recognize what a sp.polygon is
+
+plot_rpd <- function(xmean_ccmod_rcp, ca_xmean, stepsize, varname, endplot){ #xminpoint, xmaxpoint,
+  modelname <- substring(deparse(substitute(xmean_ccmod_rcp)), 7)
+  rcp_first <- substring(modelname, nchar(modelname)-1, nchar(modelname)-1)
+  rcp_last <- substring(modelname, nchar(modelname))
+  ccmodname <- substring(modelname, 1, nchar(modelname)-3)
+  prettymodname <- paste0(ccmodname, " RCP ", rcp_first, ".", rcp_last)
+  # round for pretty seq values
+  # breakpoints <- seq(round_any(xminpoint, 10, f = floor), round_any(xmaxpoint, 10, f = ceiling), stepsize)
+  breakpoints <- seq(-200, 200, stepsize) 
+  mycolors <- colorRampPalette(c(cbpblack[3], cbpblack[4], cbpblack[6]))
+  if(varname=="TMP"){
+    mycolors <- colorRampPalette(c(cbpblack[6], cbpblack[4], cbpblack[3]))
+  }
+  relativeraster <- rpd_f(xmean_ccmod_rcp, ca_xmean)
+  
+  if(endplot==TRUE){
+    tbdspplot <- spplot(relativeraster, cex=0.8, col.regions=mycolors, main=list(label=prettymodname, cex=0.8), at = breakpoints, par.settings = list(layout.heights=list(top.padding=1, bottom.padding=0), layout.widths=list(left.padding=0, right.padding=0)), 
+                      colorkey = list(
+                        right = list( # see ?levelplot in package trellis, argument colorkey:
+                          fun = draw.colorkey,
+                          args = list(
+                            key = list(
+                              at = seq(0, 1, 1/length(breakpoints)), # colour breaks
+                              col = mycolors(length(breakpoints)), # colours
+                              labels = list(
+                              at = seq(0, 1, 2/length(breakpoints)),
+                              labels = breakpoints
+                              )
+                            )
+                          )
+                        )
+                      )
+                    ) + latticeExtra::layer(sp.polygons(cacounties, lwd = 1, col="white"))
+    png(paste0('ch5 climate change/outputdata/rplot54_', varname, '_', modelname, '_rpd.png'), width=3.25, height=2.85, units="in", pointsize=8, res=900)
+      par(mar=c(0,0,1,2) + 0.1)
+      print(tbdspplot)
+      grid.text("relative\n% diff (-)", 0.65, 0.82, just="right")
+    dev.off()
+  } else{
+    tbdspplot <- spplot(relativeraster, cex=0.8, col.regions=mycolors, main=list(label=prettymodname, cex=0.8), at = breakpoints, par.settings = list(layout.heights=list(top.padding=1, bottom.padding=0), layout.widths=list(left.padding=0, right.padding=0)), colorkey=FALSE) + latticeExtra::layer(sp.polygons(cacounties, lwd = 1, col="white"))
+    png(paste0('ch5 climate change/outputdata/rplot54_', varname, '_', modelname, '_rpd.png'), width=3.25, height=2.85, units="in", pointsize=8, res=900)
+      par(mar=c(0,0,1,2) + 0.1)
+      print(tbdspplot)
+    dev.off()
+  }
+}
+
+plot_rpd(pmean_CanESM2_85, ca_pmean, 25, "PPT", endplot=FALSE)
+plot_rpd(pmean_CNRMCM5_85, ca_pmean, 25, "PPT", endplot=TRUE)
+plot_rpd(pmean_HadGEM2ES_85, ca_pmean, 25, "PPT", endplot=FALSE)
+plot_rpd(pmean_MIROC5_85, ca_pmean, 25, "PPT", endplot=TRUE)
+plot_rpd(pmean_CanESM2_45, ca_pmean, 25, "PPT", endplot=FALSE)
+plot_rpd(pmean_CNRMCM5_45, ca_pmean, 25, "PPT", endplot=FALSE)
+plot_rpd(pmean_HadGEM2ES_45, ca_pmean, 25, "PPT", endplot=FALSE)
+plot_rpd(pmean_MIROC5_45, ca_pmean, 25, "PPT", endplot=FALSE)
+
+plot_rpd(tmean_CanESM2_85, ca_tmean, 25, "TMP", endplot=FALSE)
+plot_rpd(tmean_CNRMCM5_85, ca_tmean, 25, "TMP", endplot=TRUE)
+plot_rpd(tmean_HadGEM2ES_85, ca_tmean, 25, "TMP", endplot=FALSE)
+plot_rpd(tmean_MIROC5_85, ca_tmean, 25, "TMP", endplot=TRUE)
+plot_rpd(tmean_CanESM2_45, ca_tmean, 25, "TMP", endplot=FALSE)
+plot_rpd(tmean_CNRMCM5_45, ca_tmean, 25, "TMP", endplot=FALSE)
+plot_rpd(tmean_HadGEM2ES_45, ca_tmean, 25, "TMP", endplot=FALSE)
+plot_rpd(tmean_MIROC5_45, ca_tmean, 25, "TMP", endplot=FALSE)
+
+plot_rpd(rmean_CanESM2_85, ca_rmean, 25, "RNF", endplot=FALSE)
+plot_rpd(rmean_CNRMCM5_85, ca_rmean, 25, "RNF", endplot=TRUE)
+plot_rpd(rmean_HadGEM2ES_85, ca_rmean, 25, "RNF", endplot=FALSE)
+plot_rpd(rmean_MIROC5_85, ca_rmean, 25, "RNF", endplot=TRUE)
+plot_rpd(rmean_CanESM2_45, ca_rmean, 25, "RNF", endplot=FALSE)
+plot_rpd(rmean_CNRMCM5_45, ca_rmean, 25, "RNF", endplot=FALSE)
+plot_rpd(rmean_HadGEM2ES_45, ca_rmean, 25, "RNF", endplot=FALSE)
+plot_rpd(rmean_MIROC5_45, ca_rmean, 25, "RNF", endplot=FALSE)
+
+# pptplotall <- list(pptplot1, pptplot2, pptplot3, pptplot4, pptplot5, pptplot6, pptplot7, pptplot8)
+# 
+# library(gridExtra)
+# pptplot <- do.call(grid.arrange, pptplotall)
+# png('ch5 climate change/outputdata/rplot54_ppt_all_rpd.png', width=6.5, height=8, units="in", pointsize=8, res=900)
+#   # print(pptplot)
+#   par(mfrow=c(2,4))
+#   pptplot1
+#   pptplot2
+#   pptplot3
+#   pptplot4
+#   pptplot5
+#   pptplot6
+#   pptplot7
+#   pptplot8
+# dev.off()
+```
+
+```{r relative_percent_diff_values}
+# mean across time, calcualte relative/percent change, then mean across space
+# ONLY FOR CALIFORNIA SO CLIP TO CA BOUNDARY
+stackmeanmean <- function(xmean_ccmod_rcp, ca_xmean){
+  # calcualte Relative Percent Difference instead, because true 0 are messing us up
+  relativeraster <- rpd_f(xmean_ccmod_rcp, ca_xmean)
+  relativeraster_clipped <- mask(relativeraster, cacounties)
+  cellStats(relativeraster_clipped, stat="mean")
+}
+
+relperdifftable <- function(xmean_ccmod_rcp, ca_xmean, varname){
+  stackname <- deparse(substitute(xmean_ccmod_rcp))
+  modelname <- substring(stackname, 7)
+  rcpname <- substr(modelname, nchar(modelname)-1, nchar(modelname))
+  ccmodname <- substr(modelname, 1, nchar(modelname)-3)
+  
+  mean_annual_df <- data.frame(stackmeanmean(xmean_ccmod_rcp, ca_xmean))
+  colnames(mean_annual_df)[1] <- varname
+  mean_annual_df$CCMOD <- ccmodname
+  mean_annual_df$RCP <- rcpname
+  mean_annual_df
+}
+
+# make the df
+relperdif_df2 <- relperdifftable(pmean_CanESM2_85, ca_pmean, "PPT")
+relperdif_df3 <- relperdifftable(pmean_CNRMCM5_85, ca_pmean, "PPT")
+relperdif_df4 <- relperdifftable(pmean_HadGEM2ES_85, ca_pmean, "PPT")
+relperdif_df5 <- relperdifftable(pmean_MIROC5_85, ca_pmean, "PPT")
+relperdif_df6 <- relperdifftable(pmean_CanESM2_45, ca_pmean, "PPT")
+relperdif_df7 <- relperdifftable(pmean_CNRMCM5_45, ca_pmean, "PPT")
+relperdif_df8 <- relperdifftable(pmean_HadGEM2ES_45, ca_pmean, "PPT")
+relperdif_df9 <- relperdifftable(pmean_MIROC5_45, ca_pmean, "PPT")
+
+PPT_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+relperdif_df2 <- relperdifftable(tmean_CanESM2_85, ca_tmean, "TMP")
+relperdif_df3 <- relperdifftable(tmean_CNRMCM5_85, ca_tmean, "TMP")
+relperdif_df4 <- relperdifftable(tmean_HadGEM2ES_85, ca_tmean, "TMP")
+relperdif_df5 <- relperdifftable(tmean_MIROC5_85, ca_tmean, "TMP")
+relperdif_df6 <- relperdifftable(tmean_CanESM2_45, ca_tmean, "TMP")
+relperdif_df7 <- relperdifftable(tmean_CNRMCM5_45, ca_tmean, "TMP")
+relperdif_df8 <- relperdifftable(tmean_HadGEM2ES_45, ca_tmean, "TMP")
+relperdif_df9 <- relperdifftable(tmean_MIROC5_45, ca_tmean, "TMP")
+
+TMP_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+relperdif_df2 <- relperdifftable(rmean_CanESM2_85, ca_rmean, "RNF")
+relperdif_df3 <- relperdifftable(rmean_CNRMCM5_85, ca_rmean, "RNF")
+relperdif_df4 <- relperdifftable(rmean_HadGEM2ES_85, ca_rmean, "RNF")
+relperdif_df5 <- relperdifftable(rmean_MIROC5_85, ca_rmean, "RNF")
+relperdif_df6 <- relperdifftable(rmean_CanESM2_45, ca_rmean, "RNF")
+relperdif_df7 <- relperdifftable(rmean_CNRMCM5_45, ca_rmean, "RNF")
+relperdif_df8 <- relperdifftable(rmean_HadGEM2ES_45, ca_rmean, "RNF")
+relperdif_df9 <- relperdifftable(rmean_MIROC5_45, ca_rmean, "RNF")
+
+RNF_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+tbddf <- merge(PPT_relperdif_df, TMP_relperdif_df, by=c("CCMOD", "RCP"))
+cc_relperdif_df <- merge(tbddf, RNF_relperdif_df, by=c("CCMOD", "RCP"))
+remove(tbddf)
+
+cc_relperdif_df$CCMOD <- factor(cc_relperdif_df$CCMOD, levels=c("CanESM2", "CNRMCM5", "HadGEM2ES", "MIROC5"))
+
+png('ch5 climate change/outputdata/rplot56_relperdiff_1.png', width=3.25*2, height=2.85, units="in", pointsize=8, res=900)
+  par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+  ggplot(cc_relperdif_df, aes(x=TMP, y=PPT, col=CCMOD, shape=RCP))+
+    geom_point(size=3)+
+    # ggtitle("CA only") +
+    xlab("Relative Percent Difference in Temperature (-)")+
+    ylab("RPD in Precipitation (-)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_shape_manual(values= c(1, 19), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+dev.off()
+
+png('ch5 climate change/outputdata/rplot56_relperdiff_2.png', width=3.25*2, height=2.85, units="in", pointsize=8, res=900)
+  par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+  ggplot(cc_relperdif_df, aes(x=PPT, y=RNF, col=CCMOD, shape=RCP))+
+    geom_point(size=3)+
+    # ggtitle("CA only") +
+    xlab("Relative Percent Difference in Precipitation (-)")+
+    ylab("RPD in Runoff (-)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_shape_manual(values= c(1, 19), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+dev.off()
+```
+
+```{r mean_percentchanges_30yearcomp}
+# calculate percentage change in rasters first, then mean across time, then mean across space
+stackmeanmean2 <- function(xstack_ccmod_rcp, xstack_obs){
+  # use a 30 year range, match the D. Pierce report
+  xstack_obs <- xstack_obs[[(nlayers(xstack_obs)-30-9+1):(nlayers(xstack_obs)-9)]]
+  xstack_ccmod_rcp <- xstack_ccmod_rcp[[(nlayers(xstack_ccmod_rcp)-30+1):nlayers(xstack_ccmod_rcp)]]
+  relativestack <- rpd_f(xstack_ccmod_rcp, xstack_obs)
+  # lots of real zeros are making things funcky
+  relativestack <- mask(relativestack, relativestack, maskvalue = Inf, updatevalue = 0)
+  relativestack_clipped <- mask(relativestack, cacounties)
+  relativestack_clipped_mean <- stackApply(relativestack_clipped, rep(1, nlayers(relativestack_clipped)), fun=mean, na.rm=TRUE)
+  cellStats(relativestack_clipped_mean, stat="mean", na.rm=TRUE)
+}
+
+relperdifftable <- function(xstack_ccmod_rcp, xstack_obs, varname){
+  stackname <- deparse(substitute(xstack_ccmod_rcp))
+  modelname <- substring(stackname, 8)
+  rcpname <- substr(modelname, nchar(modelname)-1, nchar(modelname))
+  ccmodname <- substr(modelname, 1, nchar(modelname)-3)
+  
+  mean_annual_df <- data.frame(stackmeanmean2(xstack_ccmod_rcp, xstack_obs))
+  colnames(mean_annual_df)[1] <- varname
+  mean_annual_df$CCMOD <- ccmodname
+  mean_annual_df$RCP <- rcpname
+  mean_annual_df
+}
+
+# make the df
+relperdif_df2 <- relperdifftable(pstack_CanESM2_85, pstack, "PPT")
+relperdif_df3 <- relperdifftable(pstack_CNRMCM5_85, pstack, "PPT")
+relperdif_df4 <- relperdifftable(pstack_HadGEM2ES_85, pstack, "PPT")
+relperdif_df5 <- relperdifftable(pstack_MIROC5_85, pstack, "PPT")
+relperdif_df6 <- relperdifftable(pstack_CanESM2_45, pstack, "PPT")
+relperdif_df7 <- relperdifftable(pstack_CNRMCM5_45, pstack, "PPT")
+relperdif_df8 <- relperdifftable(pstack_HadGEM2ES_45, pstack, "PPT")
+relperdif_df9 <- relperdifftable(pstack_MIROC5_45, pstack, "PPT")
+
+PPT_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+relperdif_df2 <- relperdifftable(tstack_CanESM2_85, tstack, "TMP")
+relperdif_df3 <- relperdifftable(tstack_CNRMCM5_85, tstack, "TMP")
+relperdif_df4 <- relperdifftable(tstack_HadGEM2ES_85, tstack, "TMP")
+relperdif_df5 <- relperdifftable(tstack_MIROC5_85, tstack, "TMP")
+relperdif_df6 <- relperdifftable(tstack_CanESM2_45, tstack, "TMP")
+relperdif_df7 <- relperdifftable(tstack_CNRMCM5_45, tstack, "TMP")
+relperdif_df8 <- relperdifftable(tstack_HadGEM2ES_45, tstack, "TMP")
+relperdif_df9 <- relperdifftable(tstack_MIROC5_45, tstack, "TMP")
+
+TMP_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+relperdif_df2 <- relperdifftable(rstack_CanESM2_85, rstack, "RNF")
+relperdif_df3 <- relperdifftable(rstack_CNRMCM5_85, rstack, "RNF")
+relperdif_df4 <- relperdifftable(rstack_HadGEM2ES_85, rstack, "RNF")
+relperdif_df5 <- relperdifftable(rstack_MIROC5_85, rstack, "RNF")
+relperdif_df6 <- relperdifftable(rstack_CanESM2_45, rstack, "RNF")
+relperdif_df7 <- relperdifftable(rstack_CNRMCM5_45, rstack, "RNF")
+relperdif_df8 <- relperdifftable(rstack_HadGEM2ES_45, rstack, "RNF")
+relperdif_df9 <- relperdifftable(rstack_MIROC5_45, rstack, "RNF")
+
+RNF_relperdif_df <- rbind(relperdif_df2, relperdif_df3, relperdif_df4, relperdif_df5, relperdif_df6, relperdif_df7, relperdif_df8, relperdif_df9)
+
+tbddf <- merge(PPT_relperdif_df, TMP_relperdif_df, by=c("CCMOD", "RCP"))
+cc_relperdif_df <- merge(tbddf, RNF_relperdif_df, by=c("CCMOD", "RCP"))
+remove(tbddf)
+
+cc_relperdif_df$CCMOD <- factor(cc_relperdif_df$CCMOD, levels=c("CanESM2", "CNRMCM5", "HadGEM2ES", "MIROC5"))
+
+rpdpptvstmp <- ggplot(cc_relperdif_df, aes(x=TMP, y=PPT, col=CCMOD, shape=RCP))+
+    geom_point(size=3, show.legend = FALSE)+
+    # ggtitle("CA only") +
+    xlab("RPD in Temperature (-)")+
+    ylab("RPD in Precipitation (-)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_shape_manual(values= c(1, 19), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+rpdrnfvsppt <- ggplot(cc_relperdif_df, aes(x=PPT, y=RNF, col=CCMOD, shape=RCP))+
+    geom_point(size=3)+
+    # ggtitle("CA only") +
+    xlab("RPD in Precipitation (-)")+
+    ylab("RPD in Runoff (-)")+
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_shape_manual(values= c(1, 19), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+
+png('ch5 climate change/outputdata/rplot56_relperdiff_all.png', width=6.5, height=2.85, units="in", pointsize=8, res=900)
+  ggarrange(rpdpptvstmp, rpdrnfvsppt, ncol=2)
+dev.off()
+```
+
+```{r mean_annual_ppt}
+# mean across the raster
+mean_annual_vector <- function(stack){
+  mean_annual_var <- c()
+  for(i in 1:nlayers(stack)){
+    mean_annual_var[i] <- mean(getValues(stack[[i]]), na.rm=TRUE)
+  }
+  mean_annual_var
+}
+
+# for OBS, from 1914 - 2014
+obs_mean_annual_df <- data.frame(PPT=mean_annual_vector(pstack))
+obs_mean_annual_df$TMP <- mean_annual_vector(tstack)
+obs_mean_annual_df$RNF <- mean_annual_vector(rstack)
+obs_mean_annual_df$YEAR <- c(1914:2014)
+obs_mean_annual_df$CCMOD <- "OBS"
+obs_mean_annual_df$RCP <- "85" # this was set to NA but for plotting a solid line changed to 85
+
+# for CCMODS, from 2015 - 2099
+buildvartable <- function(xstack_cc_rcp, varname){
+  stackname <- deparse(substitute(xstack_cc_rcp))
+  modelname <- substring(stackname, 8)
+  rcpname <- substr(modelname, nchar(modelname)-1, nchar(modelname))
+  ccmodname <- substr(modelname, 1, nchar(modelname)-3)
+  mean_annual_df <- data.frame(mean_annual_vector(xstack_cc_rcp))
+  colnames(mean_annual_df)[1] <- varname
+  mean_annual_df$YEAR <- c(2015:2099)
+  mean_annual_df$CCMOD <- ccmodname
+  mean_annual_df$RCP <- rcpname
+  mean_annual_df
+}
+
+mean_annual_df2 <- buildvartable(pstack_CanESM2_85, "PPT")
+mean_annual_df3 <- buildvartable(pstack_CNRMCM5_85, "PPT")
+mean_annual_df4 <- buildvartable(pstack_HadGEM2ES_85, "PPT")
+mean_annual_df5 <- buildvartable(pstack_MIROC5_85, "PPT")
+mean_annual_df6 <- buildvartable(pstack_CanESM2_45, "PPT")
+mean_annual_df7 <- buildvartable(pstack_CNRMCM5_45, "PPT")
+mean_annual_df8 <- buildvartable(pstack_HadGEM2ES_45, "PPT")
+mean_annual_df9 <- buildvartable(pstack_MIROC5_45, "PPT")
+
+PPT_mean_annual_df <- rbind(mean_annual_df2, mean_annual_df3, mean_annual_df4, mean_annual_df5, mean_annual_df6, mean_annual_df7, mean_annual_df8, mean_annual_df9)
+
+mean_annual_df2 <- buildvartable(tstack_CanESM2_85, "TMP")
+mean_annual_df3 <- buildvartable(tstack_CNRMCM5_85, "TMP")
+mean_annual_df4 <- buildvartable(tstack_HadGEM2ES_85, "TMP")
+mean_annual_df5 <- buildvartable(tstack_MIROC5_85, "TMP")
+mean_annual_df6 <- buildvartable(tstack_CanESM2_45, "TMP")
+mean_annual_df7 <- buildvartable(tstack_CNRMCM5_45, "TMP")
+mean_annual_df8 <- buildvartable(tstack_HadGEM2ES_45, "TMP")
+mean_annual_df9 <- buildvartable(tstack_MIROC5_45, "TMP")
+
+TMP_mean_annual_df <- rbind(mean_annual_df2, mean_annual_df3, mean_annual_df4, mean_annual_df5, mean_annual_df6, mean_annual_df7, mean_annual_df8, mean_annual_df9)
+
+mean_annual_df2 <- buildvartable(rstack_CanESM2_85, "RNF")
+mean_annual_df3 <- buildvartable(rstack_CNRMCM5_85, "RNF")
+mean_annual_df4 <- buildvartable(rstack_HadGEM2ES_85, "RNF")
+mean_annual_df5 <- buildvartable(rstack_MIROC5_85, "RNF")
+mean_annual_df6 <- buildvartable(rstack_CanESM2_45, "RNF")
+mean_annual_df7 <- buildvartable(rstack_CNRMCM5_45, "RNF")
+mean_annual_df8 <- buildvartable(rstack_HadGEM2ES_45, "RNF")
+mean_annual_df9 <- buildvartable(rstack_MIROC5_45, "RNF")
+
+RNF_mean_annual_df <- rbind(mean_annual_df2, mean_annual_df3, mean_annual_df4, mean_annual_df5, mean_annual_df6, mean_annual_df7, mean_annual_df8, mean_annual_df9)
+
+tbddf <- merge(PPT_mean_annual_df, TMP_mean_annual_df, by=c("YEAR", "CCMOD", "RCP"))
+cc_mean_annual_df <- merge(tbddf, RNF_mean_annual_df, by=c("YEAR", "CCMOD", "RCP"))
+remove(tbddf)
+
+mean_annual_df <- rbind(obs_mean_annual_df, cc_mean_annual_df)
+head(mean_annual_df)
+tail(mean_annual_df)
+
+mean_annual_df$CCMOD <- factor(mean_annual_df$CCMOD, levels=c("OBS", "CanESM2", "CNRMCM5", "HadGEM2ES", "MIROC5"))
+
+pptplot <- ggplot(mean_annual_df, aes(x=YEAR, y=PPT, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend = FALSE)+
+    ggtitle("CA + NV") +
+    xlab("")+
+    ylab("Mean Annual\nPrecipitation (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(1:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+tmpplot <- ggplot(mean_annual_df, aes(x=YEAR, y=TMP, col=CCMOD, linetype=RCP))+
+    geom_line(show.legend = FALSE)+
+    xlab("")+
+    ylab("Mean Annual\nAir Temperature (Deg C)")+
+    scale_colour_manual(values = cbpblack[c(1:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()
+
+rnfplot <- ggplot(mean_annual_df, aes(x=YEAR, y=RNF, col=CCMOD, linetype=RCP))+
+    geom_line()+
+    xlab("")+
+    ylab("Mean Annual\nRunoff (mm/day)")+
+    scale_colour_manual(values = cbpblack[c(1:5)]) +
+    scale_linetype_manual(values= c("dotted", "solid"), breaks=c("45", "85"), labels=c("RCP 4.5", "RCP 8.5"))+
+    theme_bw()+
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(order = 1))
+
+png('ch5 climate change/outputdata/rplot55_obscc_all.png', width=6.5, height=6.5, units="in", pointsize=8, res=900)
+  ggarrange(pptplot, tmpplot, rnfplot, ncol=1)
+dev.off()
+```
+
+```{r percent_change_table}
+library(reshape2)
+ppt_agg_df <- aggregate(PPT~CCMOD+RCP, data=mean_annual_df, FUN=mean)
+tmp_agg_df <- aggregate(TMP~CCMOD+RCP, data=mean_annual_df, FUN=mean)
+rnf_agg_df <- aggregate(RNF~CCMOD+RCP, data=mean_annual_df, FUN=mean)
+
+agg_df <- merge(ppt_agg_df, tmp_agg_df, by=c("CCMOD", "RCP"))
+agg_df <- merge(agg_df, rnf_agg_df, by=c("CCMOD", "RCP"))
+
+agg_df_long <- melt(agg_df, id.vars=c("CCMOD", "RCP"))
+agg_df_wide <- dcast(agg_df_long, CCMOD ~ RCP + variable, mean, value.var="value")
+
+# fix obs values for RCP even though it doesn't make sense, it will help with finding the % change
+agg_df_wide[1, 2:4] <- agg_df_wide[1, 5:7]
+
+# relative percent difference 
+rdptable <- 2*(agg_df_wide[2:5, -1] - agg_df_wide[rep(1, 4),-1])/(abs(agg_df_wide[2:5, -1]) + abs(agg_df_wide[rep(1, 4),-1]))*100
+
+round_df <- function(x, digits) {
+    # round all numeric variables
+    # x: data frame 
+    # digits: number of digits to round
+    numeric_columns <- sapply(x, mode) == 'numeric'
+    x[numeric_columns] <-  round(x[numeric_columns], digits)
+    x
+}
+
+rdptable <- round_df(rdptable, 0)
+rownames(rdptable) <- agg_df_wide[2:5, 1]
+rdptable
+```
+
+```{r density_unrouted_runoff}
+density(rmeanstack_CanESM2_45[[1]])
+density(ca_rmean)
+```
+
+
+
+
+
+

@@ -1,37 +1,36 @@
 ---
-title: "modelling"
+title: "climatechange"
 author: "Ellie White"
 date: "March 22, 2019"
 output: html_document
 ---
 
-Record of builidng different rainfall-runoff models. 
+Record of "future" hydrology as predicted by the NN model and climate model projections. 
 
-# Contents   
+# Contents
 1.0 Data Gathering  
-2.0 Modelling 
- 
-# Libraries  
- 
+2.0 Data Transformations  
+3.0 Functions  
+4.0 Loading the Model and Making Predictions
+5.0 Analyze the Model (Weights and Biases) 
+6.0 Plots  
+  6.1 Time Series  
+  6.2 Density  
+  6.3 Monthly, Rolling Annual, Rolling 10 Year Runoff/UF  
 
 ```{r, include=FALSE}
 library(knitr)
 library(formatR)
-opts_chunk$set(
-  fig.width  = 7.5,
-  fig.height = 7.5,
-  collapse   = TRUE,
-  tidy       = FALSE
-)
+opts_chunk$set(fig.width = 7.5, fig.height = 7.5, collapse = TRUE, tidy = FALSE)
 ```
 
 # Citations
-```{r citations}
+```{r citations} 
 # cite R 
 toBibtex(citation())
 
 # cite packages
-citethese <- c("raster", "rgdal", "rgeos", "dismo", "geosphere", "prism", "sharpshootR", "reshape2")
+citethese <- c("zoo", "astsa", "ggplot2", "ggpmisc")
 for(i in seq_along(citethese)){
   x <- citation(citethese[i])
   print(toBibtex(x))
@@ -39,527 +38,768 @@ for(i in seq_along(citethese)){
 
 sessionInfo()
 ```
-
+ 
 # 1.0 Data Gathering
-```{r data_gathering}
-moddf <- readRDS('inputdata/moddf_inc.rds')
+```{r data_gathering} 
+CanESM2_85_df <- readRDS('inputdata/CanESM2_85_moddf.rds')
+CNRMCM5_85_df <- readRDS('inputdata/CNRMCM5_85_moddf.rds')
+HadGEM2ES_85_df <- readRDS('inputdata/HadGEM2ES_85_moddf.rds')
+MIROC5_85_df <- readRDS('inputdata/MIROC5_85_moddf.rds')
 
-# order by baisn name
-moddf <- moddf[order(moddf$CDEC_ID),]
-row.names(moddf) <- 1:nrow(moddf)
+CanESM2_45_df <- readRDS('inputdata/CanESM2_45_moddf.rds')
+CNRMCM5_45_df <- readRDS('inputdata/CNRMCM5_45_moddf.rds')
+HadGEM2ES_45_df <- readRDS('inputdata/HadGEM2ES_45_moddf.rds')
+MIROC5_45_df <- readRDS('inputdata/MIROC5_45_moddf.rds')
 
+preprocess_data <- function(df){
+  # remove DOMGEOLOGY cause it's causing problems
+  df <- df[ , !(colnames(df) %in% c("DOMGEOLOGY"))]
+  
+  # order by baisn name
+  df <- df[order(df$CDEC_ID), ]
+  row.names(df) <- 1:nrow(df)
+  
+  return(df)
+  # # get rid of negative flows, as of now there are no flows in the dataset 
+  # moddf <- df[df$FLOW>=0, ]
+}
+
+CanESM2_85_moddf <- preprocess_data(CanESM2_85_df)
+CNRMCM5_85_moddf <- preprocess_data(CNRMCM5_85_df)
+HadGEM2ES_85_moddf <- preprocess_data(HadGEM2ES_85_df)
+MIROC5_85_moddf <- preprocess_data(MIROC5_85_df)
+
+CanESM2_45_moddf <- preprocess_data(CanESM2_45_df)
+CNRMCM5_45_moddf <- preprocess_data(CNRMCM5_45_df)
+HadGEM2ES_45_moddf <- preprocess_data(HadGEM2ES_45_df)
+MIROC5_45_moddf <- preprocess_data(MIROC5_45_df)
+
+# # check if all the negatives are gone from moddf, as of now there are no flows
+# tbd <- HadGEMES_85_moddf[HadGEMES_85_moddf$FLOW<0, "FLOW"]
+# tbd <- na.omit(tbd)
+# length(tbd) == 0
+# remove(tbd)
+```
+
+```{r data_gathering_extra}
+# some helpful dataframes, may come in handy later for post processing
+basins_points <- read.csv("inputdata/cdec_fnf_stations_data_minus_sfj_otr_bhn_ftm_sfr_sjm_klo.csv", stringsAsFactors = FALSE)
+coordinates(basins_points) <- ~LONGITUDE+LATITUDE
+proj4string(basins_points) <- CRS("+proj=longlat +datum=WGS84")
+
+basins <- readRDS("inputdata/basins.rds")
+cacounties <- readRDS("inputdata/counties.rds")
+
+ta <- CRS("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=km +ellps=GRS80")
+basins_points <- spTransform(basins_points, ta)
+basins <- spTransform(basins, ta)
+cacounties <- spTransform(cacounties, ta)
+```
+
+```{r visuals} 
+# colourblind palettes
+# ordered:     black      pink        orange     yellow     green       blue      darkorange  lightblue
+cbpgrey <-  c("#999999", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+cbpblack <- c("#000000", "#CC79A7",  "#E69F00", "#F0E442", "#009E73", "#0072B2", "#D55E00", "#56B4E9")
+```
+
+# 2.0 Data Tranformations
+```{r data_transformation}
 # split into two one original aggregate basins and one the incremental basins
-df_agg <- moddf[1:18504,]
-df_inc <- moddf[18505:nrow(moddf),]
+split_agg <- function(moddf){
+  name_inc <- substr(moddf$CDEC_ID, 5,7)
+  name_has_inc <- ifelse(name_inc=="",0,1)
+  df_inc <- moddf[which(name_has_inc==1),]
+  df_agg <- moddf[which(name_has_inc==0),]
+  
+  # get rid of na values 
+  df_agg <- na.omit(df_agg)
+  df_inc <- na.omit(df_inc)
+  
+  # order 
+  df_agg <- df_agg[order(df_agg[, "CDEC_ID"], df_agg[, "DATE"]), ]
+  
+  # just return the agg for now
+  return(df_agg)
+}
 
-# get rid of the negative values
-df_agg <- df_agg[df_agg$FLOW>0,]
+CanESM2_85_moddf <- split_agg(CanESM2_85_moddf)
+CNRMCM5_85_moddf <- split_agg(CNRMCM5_85_moddf)
+HadGEM2ES_85_moddf <- split_agg(HadGEM2ES_85_moddf)
+MIROC5_85_moddf <- split_agg(MIROC5_85_moddf)
 
-results_agg <- df_agg
-results_inc <- df_inc
+CanESM2_45_moddf <- split_agg(CanESM2_45_moddf)
+CNRMCM5_45_moddf <- split_agg(CNRMCM5_45_moddf)
+HadGEM2ES_45_moddf <- split_agg(HadGEM2ES_45_moddf)
+MIROC5_45_moddf <- split_agg(MIROC5_45_moddf)
 ```
 
-```{r setseed}
-set.seed(3222019)
+# 3.0 Functions
+```{r funcstoimport}
+# library(hydroGOF) # this is giving wrong functions, do not load it in make sure the search path is clear
+goffuncs <- list.files("libraries/HydroGOFm/R")
+for(i in 1:length(goffuncs)){
+  source(paste0("libraries/HydroGOFm/R/", goffuncs[i]))
+}
+remove(goffuncs)
+
+search()
 ```
 
-# 2.0 Modelling
+# 4.0 Loading the Model Making Predictions
+Use NN, AGG, MSE, LOGOCV 
+```{r plot_the_problem} 
+# load results already in obs pred
+resultsls <- readRDS("ch4 resampling/outputdata/rds/nn_agg_logo_results.RDS")
 
-## 2.1 Linear Models
-```{r lm}
-lm_agg <- lm(FLOW~., data=df_agg[,17:ncol(df_agg)])
-summary(lm_agg)
+# make a copy of original dataframe
+df_agg <- readRDS("Inputdata/moddf.rds")
+df_agg <- df_agg[which(ifelse(substr(df_agg$CDEC_ID, 5,7)=="",0,1)==0),]
+df_agg <- df_agg[df_agg$FLOW>=0, ]
+resultsdf <- df_agg <- na.omit(df_agg)
 
-lm_inc <- lm(FLOW~., data=df_inc[,17:ncol(df_inc)])
-summary(lm_inc)
+results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+resultsdf <- cbind(resultsdf, LOGOFIT=results_unlisted$pred)
+resultsdf$LOGORES <- resultsdf$LOGOFIT-resultsdf$FLOW
+resultsdf$KF <- as.numeric(resultsdf$CDEC_ID)
+colnames(resultsdf)[ncol(resultsdf)] <- "LOGOKF"
+resultsdf$HIERARCHY <- factor(resultsdf$HIERARCHY)
+
+# standardize residuals by mean annual flow
+resultsdf_meanflow <- aggregate(FLOW~CDEC_ID+WATERYEAR, resultsdf, FUN=mean)
+colnames(resultsdf_meanflow)[ncol(resultsdf_meanflow)] <- "MEANFLOW"
+resultsdf <- merge(resultsdf, resultsdf_meanflow, by=c("CDEC_ID", "WATERYEAR"))
+resultsdf$STANDARDIZED_LOGORES <- resultsdf$LOGORES/resultsdf$MEANFLOW
+
+# studentize residuals by sd annual flow
+resultsdf_sdflow <- aggregate(FLOW~CDEC_ID+WATERYEAR, resultsdf, FUN=sd)
+colnames(resultsdf_sdflow)[ncol(resultsdf_sdflow)] <- "SDFLOW"
+resultsdf <- merge(resultsdf, resultsdf_sdflow, by=c("CDEC_ID", "WATERYEAR"))
+resultsdf$STUDENTIZED_LOGORES <- resultsdf$LOGORES/resultsdf$SDFLOW
+
+png('ch5 climate change/outputdata/rplot51_resovertime.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(resultsdf_infrm, aes(x=DATE, y=LOGORES, color=HIERARCHY, shape=HIERARCHY))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+  scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+  labs(x="" , y="Residuals in Uniumpaired Flow (AF/m)")+
+  geom_abline(slope=0, intercept = c(0,0), col=cbpblack[1], linetype="dashed")+
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+dev.off()
+
+resultsdf_infrm <- resultsdf[!is.infinite(resultsdf$STANDARDIZED_LOGORES), ]
+png('ch5 climate change/outputdata/rplot51_resovertime_standardized.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(resultsdf_infrm, aes(x=DATE, y=STANDARDIZED_LOGORES, color=HIERARCHY, shape=HIERARCHY))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+  scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+  labs(x="" , y="Standardized Residuals\nin Uniumpaired Flow (-)")+
+  geom_abline(slope=0, intercept = c(0,0), col=cbpblack[1], linetype="dashed")+
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+dev.off()
+
+resultsdf_infrm <- resultsdf[!is.infinite(resultsdf$STUDENTIZED_LOGORES), ]
+png('ch5 climate change/outputdata/rplot51_resovertime_studentized.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(resultsdf_infrm, aes(x=DATE, y=STUDENTIZED_LOGORES, color=HIERARCHY, shape=HIERARCHY))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+  scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+  labs(x="" , y="Studentized Residuals\nin Uniumpaired Flow (-)")+
+  geom_abline(slope=0, intercept = c(0,0), col=cbpblack[1], linetype="dashed")+
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+dev.off()
+
+png('ch5 climate change/outputdata/rplot51_resvsflow.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(resultsdf, aes(x=FLOW, y=LOGORES, color=HIERARCHY, shape=HIERARCHY))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+  scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+  labs(x="Unimpaired Flow (AF/m)" , y="Residuals in Uniumpaired Flow (AF/m)")+
+  geom_abline(slope=0, intercept = c(0,0), col=cbpblack[1], linetype="dashed")+
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+dev.off()
+
+png('ch5 climate change/outputdata/rplot51_resvsflow_standardized.png', width=6.5, height=3, units="in", pointsize=8, res=1200)
+ggplot(resultsdf, aes(x=FLOW, y=STANDARDIZED_LOGORES, color=HIERARCHY, shape=HIERARCHY))+
+  geom_point(alpha=1)+
+  scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+  xlim(c(1, 5e6))+
+  scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+  labs(x="Unimpaired Flow (AF/m)" , y="Standardized Residuals\nin Uniumpaired Flow (-)")+
+  geom_abline(slope=0, intercept = c(0,0), col=cbpblack[1], linetype="dashed")+
+  scale_y_continuous(labels = scales::comma, limits = c(-20, 20)) +
+  theme_bw()
+dev.off()
+
+# not the problem, let's just make some predictions using the nnmodel with climate changed precip and temp. Will have to have another dataprep
+
+# scientifically check if they are random
+library(astsa) 
+
+for(r in 1:length(unique(resultsdf$CDEC_ID))){
+  h <- unique(resultsdf$CDEC_ID)[r]
+  resultsdf_sub <- resultsdf[resultsdf$CDEC_ID==h,]
+  png(paste0('ch5 climate change/outputdata/residual_lagplot/rplot51_reslag_', h, '.png'), width=6.5, height=6.5, units="in", pointsize=8, res=1200)
+  lag1.plot(resultsdf_sub$LOGORES, 4)
+dev.off()
+}
+
+# obtain the correlogram of the in-sample forecast errors for lags 1:max specified. Then plot this correlation to get the ACF plot: the autocovariance or autocorrelation function. PACF is used for the partial autocorrelations. 
+
+for(r in 1:length(unique(resultsdf$CDEC_ID))){
+  h <- unique(resultsdf$CDEC_ID)[r]
+  resultsdf_sub <- resultsdf[resultsdf$CDEC_ID==h,]
+  if(h=="MKW"){
+    max_lag <- 5
+  } else {
+    max_lag <- 24
+  }
+  # the lines are a lowess fit and the sample acf is blue in the box.
+  png(paste0('ch5 climate change/outputdata/residual_acf/rplot51_resacf_', h, '.png'), width=6.5, height=4, units="in", pointsize=8, res=1200)
+    acf2(resultsdf_sub$LOGORES, max.lag = max_lag, main=h)
+  dev.off()
+}
+
+# Box-Pierce test, or Ljung–Box test
+bp_test <- lj_test <- c()
+for(r in 1:length(unique(resultsdf$CDEC_ID))){
+  h <- unique(resultsdf$CDEC_ID)[r]
+  resultsdf_sub <- resultsdf[resultsdf$CDEC_ID==h, ]
+  bp_test[r] <- Box.test(resultsdf_sub$LOGORES, lag=12, fitdf=0)$p.value
+  lj_test[r] <- Box.test(resultsdf_sub$LOGORES, lag=12, fitdf=0, type="Lj")$p.value
+}
+
+bplj_testdf <- data.frame(bp_test, lj_test)
+bplj_testdf$CDEC_ID <- unique(resultsdf$CDEC_ID)
+
+bplj_testdf <- merge(bplj_testdf, basins@data, by="CDEC_ID")
+
+library(reshape2)
+bplj_testdf_long <- melt(bplj_testdf[ , c("CDEC_ID", "bp_test", "lj_test", "HIERARCHY")], id.vars=c("CDEC_ID", "HIERARCHY"), variable.name="BOXTEST", value.name="P_VALUE")
+  
+plottoprint <- ggplot(data=bplj_testdf_long, aes(x=P_VALUE, y=CDEC_ID)) +
+    geom_point(aes(shape=BOXTEST, color=BOXTEST), size=2)+
+    facet_grid(HIERARCHY ~ ., scales = "free", space = "free") +
+    scale_shape_manual(name="Tests", breaks = c("bp_test", "lj_test"), labels=c("Box–Pierce", "Ljung–Box"), values=c(8, 16)) + 
+    scale_colour_manual(name="Tests", aesthetics = c("colour"), values=c(cbpblack[7], cbpblack[8]), breaks = c("bp_test", "lj_test"), labels=c("Box–Pierce", "Ljung–Box")) +
+    labs(x="P Value", y="")+
+    theme_bw() +
+    theme(legend.position="right", legend.title = element_blank())+
+    guides(color = guide_legend(nrow = 2), shape= guide_legend(nrow = 2))
+ 
+png('ch5 climate change/outputdata/rplot51_bpljtest.png', width=6.5, height=8, units="in", pointsize=8, res=1200)
+  print(plottoprint)
+dev.off()
 ```
 
-## 2.2 Generalized Linear Models
-```{r glm}
-glmp_agg <- glm(FLOW~. , family=poisson, data=df_agg[,17:ncol(df_agg)])
-summary(glmp_agg)
-
-glmg_inc <- glm(FLOW~. , family=gaussian, data=df_inc[,17:ncol(df_inc)])
-summary(glmg_inc)
-```
-
-## 2.3 Neural Networks
-```{r neuralnets}
-# library(nnet)
-# nn_agg1 <- nnet(FLOW ~ ., data = df_agg[ ,c(1, 17:41)], size=10)
-# 
-# # look into these settings             
-# #subset = samp, size = 2, rang = 0.1, decay = 5e-4, maxit = 200)
-# #table(df_agg$FLOW[-samp], predict(ir.nn2, df_agg[-samp,]))
-# 
-# library(neuralnet)
-# formula_numvars <- as.formula('FLOW ~ PPT + PPTLAG1 + PPTLAG2 + PPTLAG3 + SNOW + AREASQM + SHAPE + COMPACTNESS + MEANELEV + BASINRELIEFRATIO + KSAT + SILT + SAND + CLAY + AWC + LAMBDA + N + RESDT + VEGETATED')
-# nn_agg2 <- neuralnet(formula_numvars, data = df_agg[ ,c(1, 17:41)], hidden=10)
-#  
-# library(RSNNS)
-# nn_agg3 <- mlp(df_agg[c(1, 17:40)], df_agg$FLOW, size=10,linOut=TRUE)
-# 
-# library(caret)
-# nn_agg4 <- train(FLOW~.,method='nnet',data=df_agg[ ,c(1, 17:41)],linout=TRUE)
-# plot.nnet(nn_ag4, nid=TRUE)
-```
-
-Tensorflow is a numerical computing library with an interface in r. It's open-source and  hardware independent, and with it you can do modelling with huge datasets without having to put all of it in RAM.  
-
-Tensors are multi-dimensional arrays: 0D is a scalar (vector or length one), 1D is a vecotr, 2D is a matrix, and 3D and up are arrays. Examples: Dataframe with just observations are 1D or 2D (data.matrix(iris), n=10). Time series data are 3D tensors, because you have a sequence grouping, the samples are the third dimension. Images are 4D tensors, video is 5D. 
-
-Data "flows" through the graph, with nodes representing units of computation. 
-
-The "deep" in deep learning referrs to having large number of layers that transform the inputs into outputs. 
-
-Deep learning has not yet proven that it is good at analyzing data with complex spatial or sequence dependencies that are hard to model traditionally.  
-
-It's good for prediction, not necessarily understanding. 
-```{r tensorflow}
-# let's build a recurrent neural network(rnn)
-# install.packages("tensorflow")
-# install.packages("keras", type = "source")
-
+```{r nn_mod_predictions_cc}
+# load models that were saved in ch2 for vip plotting in case needed
 library(keras)
-install_keras()
+nnmodel <- list()
 
-library(tensorflow)
-install_tensorflow()
+for(k in 1:(length(unique(CanESM2_85_moddf$CDEC_ID)))){
+  h <- unique(CanESM2_85_moddf$CDEC_ID[k])
+  modfilename <- paste0("ch2 data transformations/outputdata/vi_saved_mods/nn_hdf5/nn_", h, ".h5")
+  nnmodel[[k]] <- load_model_hdf5(modfilename, compile=FALSE)
+}
 
-# check to see if all errors are resolved
-sess <-  tf$Session()
-hello <- tf$constant('Hello, TensorFlow!')
-sess$run(hello)
+cc_pred <- function(moddf_agg){ 
+  results <- modgof <- list()
+  for(k in 1:(length(unique(moddf_agg$CDEC_ID)))){
+    h <- unique(moddf_agg$CDEC_ID)[k]
+    testset <- moddf_agg[moddf_agg$CDEC_ID==h,]
+    # trainset <- moddf_agg[moddf_agg$CDEC_ID!=h,] #there's no training happening here
+    testsetpvs <- as.matrix(testset[,c(15,18:(ncol(testset)-1))])
+    # trainsetpvs <- as.matrix(trainset[,c(15,18:(ncol(trainset)-1))])
+    testsetrv <- as.matrix(testset$FLOW)
+    # trainsetrv <- as.matrix(trainset$FLOW)
+    
+    predictions <- nnmodel[[k]] %>% predict(testsetpvs)
+    predictions <- predictions[ , 1] # because output layer was specified to be of unit=1
+    
+    results[[k]] <- cbind(obs=testsetrv[ , 1], pred=predictions, nforstitch=as.numeric(rownames(testset)))
+    modgof[[k]] <- gof(as.data.frame(results[[k]])$pred, as.data.frame(results[[k]])$obs)
+  }
+  list(results=results, gof=modgof)
+}
 
-# loading the keras inbuilt mnist dataset
-data <- data.matrix(df_inc[,11:ncol(df_inc)])
+CanESM2_85_resultsls <- cc_pred(CanESM2_85_moddf)
+CNRMCM5_85_resultsls <- cc_pred(CNRMCM5_85_moddf)
+HadGEM2ES_85_resultsls <- cc_pred(HadGEM2ES_85_moddf)
+MIROC5_85_resultsls <- cc_pred(MIROC5_85_moddf)
 
-# split dataset into training, validation, and tesitng
-train_data <- data[1:2000,]
-mean <- apply(train_data, 2, mean)
-std <- apply(train_data, 2, sd)
-data <- scale(data, center = mean, scale = std)
-
-train_gen
-val_gen
-test_gen
-
-# defining a keras sequential model
-model <- keras_model_sequential()
-
-# layer_flatten(input_shape = c(lookback / step, dim(data)[-1])) %>% 
-#   layer_dense(units = 32, activation = "relu") %>% 
-#   layer_dense(units = 1)
-
-# note that models in keras is modified in place, objects are not by-value like it is conventional in r, they are by-reference. 
-model %>% 
-  layer_dense(units = 784, input_shape = 784) %>% 
-  layer_dropout(rate=0.4)%>%
-  layer_activation(activation = 'relu') %>% 
-  layer_dense(units = 10) %>%  # Note the lack of activation function on the last dense layer, which is typical for a regression problem.
-
-# compiling the defined model
-model %>% compile(
-  loss = 'mae',
-  optimizer = 'optimizer_rmsprop()'
-  )
-
-# fitting the model on the training dataset, can use validation_split=0.2 inside fit too. 
-history <- model %>% fit(train_data[,1:30], train_data[,31], epochs = 100, batch_size = 128)
-
-plot(history)
-
-# evaluating model on the cross validation dataset
-# loss_and_metrics <- model %>% evaluate(test_x, test_y, batch_size = 128)
-
-# layers in keras
-# dense layers are fully connected neural networks
-# convolutional layers try to find spatial features, mostly used in computer vision, they develop filters that find patterns
-# recurrent layers have some memory or state, they can maintain states, used in sequenced applications
-# embedding layers, in NLP vecotrizing text that recognizes semantic relationships
-
-# lots of loss functions, can write your own
-# lots of optimizers
+CanESM2_45_resultsls <- cc_pred(CanESM2_45_moddf)
+CNRMCM5_45_resultsls <- cc_pred(CNRMCM5_45_moddf)
+HadGEM2ES_45_resultsls <- cc_pred(HadGEM2ES_45_moddf)
+MIROC5_45_resultsls <- cc_pred(MIROC5_45_moddf)
 ```
 
-```{r example_tensorflow}
-dir.create("~/Downloads/tbd_climate", recursive = TRUE)
-download.file(
-  "https://s3.amazonaws.com/keras-datasets/jena_climate_2009_2016.csv.zip",
-  "~/Downloads/tbd_climate/jena_climate_2009_2016.csv.zip"
-)
-unzip(
-  "~/Downloads/tbd_climate/jena_climate_2009_2016.csv.zip",
-  exdir = "~/Downloads/tbd_climate"
-)
+```{r postprocess} 
+# make a copy of the moddfs to store results in 
+CanESM2_85_resultsdf <- CanESM2_85_moddf 
+CNRMCM5_85_resultsdf <- CNRMCM5_85_moddf
+HadGEM2ES_85_resultsdf <- HadGEM2ES_85_moddf  
+MIROC5_85_resultsdf <- MIROC5_85_moddf 
 
-library(tibble)
-library(readr)
+CanESM2_45_resultsdf <- CanESM2_45_moddf 
+CNRMCM5_45_resultsdf <- CNRMCM5_45_moddf
+HadGEM2ES_45_resultsdf <- HadGEM2ES_45_moddf  
+MIROC5_45_resultsdf <- MIROC5_45_moddf 
 
-data_dir <- "~/Downloads/tbd_climate"
-fname <- file.path(data_dir, "jena_climate_2009_2016.csv")
-data <- read_csv(fname)
+postprocess <- function(resultsdf, resultsls){ 
+  results_unlisted <- as.data.frame(do.call("rbind", resultsls$results))
+  resultsdf <- cbind(resultsdf, CCFIT=results_unlisted$pred)
+  resultsdf$CCRES <- resultsdf$CCFIT-resultsdf$FLOW 
+  
+  # adding a KF column to make it consistent between groupingstyles
+  resultsdf$KF <- as.numeric(resultsdf$CDEC_ID)
+  colnames(resultsdf)[ncol(resultsdf)] <- "KF"
+  return(resultsdf)
+}
 
-glimpse(data)
+CanESM2_85_resultsdf <- postprocess(CanESM2_85_resultsdf, CanESM2_85_resultsls)
+CNRMCM5_85_resultsdf <- postprocess(CNRMCM5_85_resultsdf, CNRMCM5_85_resultsls)
+HadGEM2ES_85_resultsdf <- postprocess(HadGEM2ES_85_resultsdf, HadGEM2ES_85_resultsls)
+MIROC5_85_resultsdf <- postprocess(MIROC5_85_resultsdf, MIROC5_85_resultsls)
 
+CanESM2_45_resultsdf <- postprocess(CanESM2_45_resultsdf, CanESM2_45_resultsls)
+CNRMCM5_45_resultsdf <- postprocess(CNRMCM5_45_resultsdf, CNRMCM5_45_resultsls)
+HadGEM2ES_45_resultsdf <- postprocess(HadGEM2ES_45_resultsdf, HadGEM2ES_45_resultsls)
+MIROC5_45_resultsdf <- postprocess(MIROC5_45_resultsdf, MIROC5_45_resultsls)
+```
+
+# 5.0 Analyze the Model (Weights and Biases)
+```{r nn_mod_analysis}
+nnmodel[[1]] %>% summary()
+
+# # devtools::install_github("andrie/deepviz")
+# library(deepviz)
+# library(magrittr)
+# nnmodel[[1]] %>% plot_model()
+```
+
+# 6.0 Plots
+
+## 6.1 Time Series
+```{r ts_plots}
+CanESM2_85_resultsdf$CCMOD <- "CanESM2"
+CNRMCM5_85_resultsdf$CCMOD <- "CNRMCM5"
+HadGEM2ES_85_resultsdf$CCMOD <- "HadGEM2ES"
+MIROC5_85_resultsdf$CCMOD <- "MIROC5"
+
+CanESM2_45_resultsdf$CCMOD <- "CanESM2"
+CNRMCM5_45_resultsdf$CCMOD <- "CNRMCM5"
+HadGEM2ES_45_resultsdf$CCMOD <- "HadGEM2ES"
+MIROC5_45_resultsdf$CCMOD <- "MIROC5"
+
+CanESM2_85_resultsdf$RCP <- "RCP 8.5"
+CNRMCM5_85_resultsdf$RCP <- "RCP 8.5"
+HadGEM2ES_85_resultsdf$RCP <- "RCP 8.5"
+MIROC5_85_resultsdf$RCP <- "RCP 8.5"
+
+CanESM2_45_resultsdf$RCP <- "RCP 4.5"
+CNRMCM5_45_resultsdf$RCP <- "RCP 4.5"
+HadGEM2ES_45_resultsdf$RCP <- "RCP 4.5"
+MIROC5_45_resultsdf$RCP <- "RCP 4.5"
+
+cc_resultsdf <- rbind(CanESM2_85_resultsdf, CNRMCM5_85_resultsdf, HadGEM2ES_85_resultsdf, MIROC5_85_resultsdf, CanESM2_45_resultsdf, CNRMCM5_45_resultsdf, HadGEM2ES_45_resultsdf, MIROC5_45_resultsdf)
+
+# just comparison of nn model projections with climate changed variables
 library(ggplot2)
-ggplot(data, aes(x = 1:nrow(data), y = `T (degC)`)) + geom_line()
-
-ggplot(data[1:1440,], aes(x = 1:1440, y = `T (degC)`)) + geom_line()
-
-lookback = 1440 #Observations will go back 10 days.
-steps = 6 #Observations will be sampled at one data point per hour.
-delay = 144 #Targets will be 24 hours in the future.
-
-sequence_generator <- function(start) {
-  value <- start - 1
-  function() {
-    value <<- value + 1
-    value
-  }
-}
-
-gen <- sequence_generator(10)
-gen()
-
-data <- data.matrix(data[,-1])
-
-train_data <- data[1:200000,]
-mean <- apply(train_data, 2, mean)
-std <- apply(train_data, 2, sd)
-data <- scale(data, center = mean, scale = std)
-
-generator <- function(data, lookback, delay, min_index, max_index,
-                      shuffle = FALSE, batch_size = 128, step = 6) {
-  if (is.null(max_index))
-    max_index <- nrow(data) - delay - 1
-  i <- min_index + lookback
-  function() {
-    if (shuffle) {
-      rows <- sample(c((min_index+lookback):max_index), size = batch_size)
-    } else {
-      if (i + batch_size >= max_index)
-        i <<- min_index + lookback
-      rows <- c(i:min(i+batch_size-1, max_index))
-      i <<- i + length(rows)
-    }
-
-    samples <- array(0, dim = c(length(rows),
-                                lookback / step,
-                                dim(data)[[-1]]))
-    targets <- array(0, dim = c(length(rows)))
-                      
-    for (j in 1:length(rows)) {
-      indices <- seq(rows[[j]] - lookback, rows[[j]]-1,
-                     length.out = dim(samples)[[2]])
-      samples[j,,] <- data[indices,]
-      targets[[j]] <- data[rows[[j]] + delay,2]
-    }           
-    list(samples, targets)
-  }
-}
-
-lookback <- 1440
-step <- 6
-delay <- 144
-batch_size <- 128
-
-train_gen <- generator(
-  data,
-  lookback = lookback,
-  delay = delay,
-  min_index = 1,
-  max_index = 200000,
-  shuffle = TRUE,
-  step = step, 
-  batch_size = batch_size
-)
-
-val_gen = generator(
-  data,
-  lookback = lookback,
-  delay = delay,
-  min_index = 200001,
-  max_index = 300000,
-  step = step,
-  batch_size = batch_size
-)
-
-test_gen <- generator(
-  data,
-  lookback = lookback,
-  delay = delay,
-  min_index = 300001,
-  max_index = NULL,
-  step = step,
-  batch_size = batch_size
-)
-
-# How many steps to draw from val_gen in order to see the entire validation set
-val_steps <- (300000 - 200001 - lookback) / batch_size
-
-# How many steps to draw from test_gen in order to see the entire test set
-test_steps <- (nrow(data) - 300001 - lookback) / batch_size
-
-
-#Here’s the evaluation loop.
-
-library(keras)
-evaluate_naive_method <- function() {
-  batch_maes <- c()
-  for (step in 1:val_steps) {
-    c(samples, targets) %<-% val_gen()
-    preds <- samples[,dim(samples)[[2]],2]
-    mae <- mean(abs(preds - targets))
-    batch_maes <- c(batch_maes, mae)
-  }
-  print(mean(batch_maes))
-}
-
-evaluate_naive_method()
-celsius_mae <- 0.29 * std[[2]]
-
-
-model <- keras_model_sequential() %>% 
-  layer_flatten(input_shape = c(lookback / step, dim(data)[-1])) %>% 
-  layer_dense(units = 32, activation = "relu") %>% 
-  layer_dense(units = 1)
-
-model %>% compile(
-  optimizer = optimizer_rmsprop(),
-  loss = "mae"
-)
-
-history <- model %>% fit_generator(
-  train_gen,
-  steps_per_epoch = 500,
-  epochs = 20,
-  validation_data = val_gen,
-  validation_steps = val_steps
-)
-plot(history)
-
-# A first recurrent baseline
-model <- keras_model_sequential() %>% 
-  layer_gru(units = 32, input_shape = list(NULL, dim(data)[[-1]])) %>% 
-  layer_dense(units = 1)
-
-model %>% compile(
-  optimizer = optimizer_rmsprop(),
-  loss = "mae"
-)
-
-history <- model %>% fit_generator(
-  train_gen,
-  steps_per_epoch = 500,
-  epochs = 20,
-  validation_data = val_gen,
-  validation_steps = val_steps
-)
-
-# using recurrent dropout to fight over fitting
-model <- keras_model_sequential() %>% 
-  layer_gru(units = 32, dropout = 0.2, recurrent_dropout = 0.2,
-            input_shape = list(NULL, dim(data)[[-1]])) %>% 
-  layer_dense(units = 1)
-
-model %>% compile(
-  optimizer = optimizer_rmsprop(),
-  loss = "mae"
-)
-
-history <- model %>% fit_generator(
-  train_gen,
-  steps_per_epoch = 500,
-  epochs = 40,
-  validation_data = val_gen,
-  validation_steps = val_steps
-)
-
-# stcking recurrent layers
-model <- keras_model_sequential() %>% 
-  layer_gru(units = 32, 
-            dropout = 0.1, 
-            recurrent_dropout = 0.5,
-            return_sequences = TRUE,
-            input_shape = list(NULL, dim(data)[[-1]])) %>% 
-  layer_gru(units = 64, activation = "relu",
-            dropout = 0.1,
-            recurrent_dropout = 0.5) %>% 
-  layer_dense(units = 1)
-
-model %>% compile(
-  optimizer = optimizer_rmsprop(),
-  loss = "mae"
-)
-
-history <- model %>% fit_generator(
-  train_gen,
-  steps_per_epoch = 500,
-  epochs = 40,
-  validation_data = val_gen,
-  validation_steps = val_steps
-)
-
-# bi directional RNNs
-library(keras)
-
-# Number of words to consider as features
-max_features <- 10000  
-
-# Cuts off texts after this number of words
-maxlen <- 500
-
-imdb <- dataset_imdb(num_words = max_features)
-c(c(x_train, y_train), c(x_test, y_test)) %<-% imdb
-
-# Reverses sequences
-x_train <- lapply(x_train, rev)
-x_test <- lapply(x_test, rev) 
-
-# Pads sequences
-x_train <- pad_sequences(x_train, maxlen = maxlen)  <4>
-x_test <- pad_sequences(x_test, maxlen = maxlen)
-
-model <- keras_model_sequential() %>% 
-  layer_embedding(input_dim = max_features, output_dim = 128) %>% 
-  layer_lstm(units = 32) %>% 
-  layer_dense(units = 1, activation = "sigmoid")
-
-model %>% compile(
-  optimizer = "rmsprop",
-  loss = "binary_crossentropy",
-  metrics = c("acc")
-)
+for (r in 1:(length(unique(cc_resultsdf$CDEC_ID)))){ 
+  # plot time series by basin
+  h <- unique(cc_resultsdf$CDEC_ID)[r]
+  resultsdf_sub <- cc_resultsdf[cc_resultsdf$CDEC_ID==h,]
   
-history <- model %>% fit(
-  x_train, y_train,
-  epochs = 10,
-  batch_size = 128,
-  validation_split = 0.2
-)
-
-
-
-model <- keras_model_sequential() %>% 
-  bidirectional(
-    layer_gru(units = 32), input_shape = list(NULL, dim(data)[[-1]])
-  ) %>% 
-  layer_dense(units = 1)
-
-model %>% compile(
-  optimizer = optimizer_rmsprop(),
-  loss = "mae"
-)
-
-history <- model %>% fit_generator(
-  train_gen,
-  steps_per_epoch = 500,
-  epochs = 40,
-  validation_data = val_gen,
-  validation_steps = val_steps
-)
-
-
-```
-
-
-
-
-
-
-# 4.0 Predict & Analyze
-There are four things we are looking for when analyzing residuals:
-* The mean of the errors is zero (and the sum of the errors is zero)
-* The distribution of the errors are normal.
-* All of the errors are independent.
-* Variance of errors is constant (Homoscedastic)
-```{r predict_lm_inc}
-results_inc$LMFIT <- lm_inc$fitted.values
-results_inc$LMRES <- lm_inc$residuals # this is obs-predstr
+  # convert the units. AREASQKM is in square kilometer, PPT is in mm/month, FLOW is in AF/month 
+  watershedArea_sqft <- resultsdf_sub$AREASQKM[1]*(1000*100/2.54/12)^2
+  resultsdf_sub$precip_ft <- resultsdf_sub$PPT/10/2.54/12
+  resultsdf_sub$precip_cuft <- resultsdf_sub$precip_ft * watershedArea_sqft
+  resultsdf_sub$precip_cfs <- resultsdf_sub$precip_cuft/30.5/24/60/60
+  resultsdf_sub$discharge_cfs <- resultsdf_sub$FLOW*0.01656433739228
   
-layout(matrix(c(1,1,2,3),2,2,byrow=T))
-# response vs. residuals Plot
-results_inc_ordered <- results_inc[order(results_inc$FLOW),]
-plot(results_inc_ordered$LMRES ~ results_inc_ordered$FLOW, main="Unimpaired Flow vs. Residuals\nfor Multiple Linear Regression", xlab="Unimpaired Flow (AF)", ylab="Residuals")
-abline(h=0,lty=2)
+  # now convert the units
+  resultsdf_sub$discharge_fit_cfs <- resultsdf_sub$CCFIT*0.01656433739228
+  
+  # remove NAs here?
+  resultsdf_sub <- na.omit(resultsdf_sub)
+  
+  # calculate the range needed to avoid having your hyetograph and hydrograph overlap 
+  maxRange <- 1*(max(resultsdf_sub$precip_cfs) + max(max(resultsdf_sub$discharge_cfs), max(resultsdf_sub$discharge_fit_cfs)))
 
-# histogram of residuals
-hist(results_inc_ordered$LMRES, main="Histogram of Residuals", ylab="Residuals")
+  # create a function to backtransform the axis labels for precipitation, for some reason multiplying it by -1 fixed the labels, kinda hacky but whatever
+  precip_labels <- function(x) {round((-1*x / watershedArea_sqft) * 12 *30.5*24*60*60, 0)} # labels in inches/month
+  
+  # melt for ggplot dataframe
+  # results_sub_melted <- melt(resultsdf_sub[, c("DATE", "discharge_cfs", "discharge_fit_cfs" )], id.var='DATE')
+  results_sub_melted <- resultsdf_sub
+                             
+  # make the plot
+  hydrograph <- ggplot(data = results_sub_melted, 
+                       aes(x = DATE, y=discharge_fit_cfs, col=CCMOD, linetype=RCP)) + 
+    xlab("")  + 
+    ggtitle(paste0('Basin CDEC ID: ', h)) +
+    
+    # use geom_tile to create the inverted hyetograph. geom_tile has a bug that displays a warning message for height and width, you can ignore it.
+    geom_tile(data=resultsdf_sub, aes(y = -1*(precip_cfs/2-maxRange), # y = the center point of each bar
+              height = precip_cfs,
+              width = 2),
+              fill = cbpblack[6],
+              color = cbpblack[6]) +
+  
+    # plot your discharge data
+    geom_line() +
+    scale_colour_manual(values = cbpblack[c(2:5)]) +
+    scale_linetype_manual(values = c("dotted", "solid")) +
+    theme_bw()+
+    theme(legend.position="bottom", legend.title = element_blank()) +
+ 
+    # create a second axis with sec_axis() and format the labels to display the original precipitation units
+    scale_y_continuous(name = "Discharge (cfs)", sec.axis = sec_axis(trans = ~1*(.-maxRange), name = "Precipitation (in/m)", labels = precip_labels)) # labels are in inches/s
+  
+  png(paste0('ch5 climate change/outputdata/timeseries_nnmodpred/timeseries_', h, '.png'), width=6.5, height=8, units="in", pointsize=12, res=1200)
+    par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+    print(hydrograph)
+  dev.off()
+}
 
-# q-q plot
-qqnorm(results_inc_ordered$LMRES)
-qqline(results_inc_ordered$LMRES)
+library(reshape2)
+# compare the fit with the NN model to the projections from the climate models
+tsplot_nnmodvccmod <- function(resultsdf, ccmod, scenario){ 
+  for (r in 1:(length(unique(resultsdf$CDEC_ID)))){ 
+    # plot time series by basin
+    h <- unique(resultsdf$CDEC_ID)[r]
+    resultsdf_sub <- resultsdf[resultsdf$CDEC_ID==h,]
+    
+    # convert the units. AREASQKM is in square kilometer, PPT is in mm/month, FLOW is in AF/month 
+    watershedArea_sqft <- resultsdf_sub$AREASQKM[1]*(1000*100/2.54/12)^2
+    resultsdf_sub$precip_ft <- resultsdf_sub$PPT/10/2.54/12
+    resultsdf_sub$precip_cuft <- resultsdf_sub$precip_ft * watershedArea_sqft
+    resultsdf_sub$precip_cfs <- resultsdf_sub$precip_cuft/30.5/24/60/60
+    resultsdf_sub$discharge_cfs <- resultsdf_sub$FLOW*0.01656433739228
+    
+    # now convert the units
+    resultsdf_sub$discharge_fit_cfs <- resultsdf_sub$CCFIT*0.01656433739228
+    
+    # remove NAs here?
+    resultsdf_sub <- na.omit(resultsdf_sub)
+    
+    # calculate the range needed to avoid having your hyetograph and hydrograph overlap 
+    maxRange <- 1*(max(resultsdf_sub$precip_cfs) + max(max(resultsdf_sub$discharge_cfs), max(resultsdf_sub$discharge_fit_cfs)))
+  
+    # create a function to backtransform the axis labels for precipitation, for some reason multiplying it by -1 fixed the labels, kinda hacky but whatever
+    precip_labels <- function(x) {round((-1*x / watershedArea_sqft) * 12 *30.5*24*60*60, 0)} # labels in inches/month
+    
+    # melt for ggplot dataframe
+    results_sub_melted <- melt(resultsdf_sub[, c("DATE", "discharge_cfs", "discharge_fit_cfs" )], id.var='DATE')
 
-# residuals are normally distributed? test residuals for normality; null hypothesis: Skewness and Kurtosis are equal to zero
-library(fBasics)
-jarqueberaTest(lm_inc$resid) 
+    # make the plot
+    hydrograph <- ggplot(data = results_sub_melted, 
+                         aes(x = DATE, y=value, col=variable)) + 
+      xlab("")  + 
+      ggtitle(paste0('Basin CDEC ID: ', h)) +
+      
+      # use geom_tile to create the inverted hyetograph. geom_tile has a bug that displays a warning message for height and width, you can ignore it.
+      geom_tile(data=resultsdf_sub, aes(y = -1*(precip_cfs/2-maxRange), # y = the center point of each bar
+                height = precip_cfs,
+                width = 2),
+                fill = cbpblack[6],
+                color = cbpblack[6]) +
+    
+      # plot your discharge data
+      geom_line(aes(linetype=variable)) +
+      scale_colour_manual("legend:", values = cbpblack[c(1, 4)], labels=c("Climate Model Projections", "NN Model Predictions")) +
+      scale_linetype_manual("legend:", values = c("solid", "dashed"), labels=c("Climate Model Projections", "NN Model Predictions")) +
+      theme_bw()+
+      theme(legend.position="bottom", legend.title = element_blank()) +
+   
+      # create a second axis with sec_axis() and format the labels to display the original precipitation units
+      scale_y_continuous(name = "Discharge (cfs)", sec.axis = sec_axis(trans = ~1*(.-maxRange), name = "Precipitation (in/m)", labels = precip_labels)) # labels are in inches/s
+    
+    png(paste0('ch5 climate change/outputdata/timeseries_ccmodpred/', ccmod, '_', scenario, '/timeseries_', h, '.png'), width=6.5, height=8, units="in", pointsize=12, res=1200)
+      par(mar=c(5,4,1,1)+0.1, ps=8, cex=1)
+      print(hydrograph)
+    dev.off()
+  }
+}
 
-# residuals are independent? dwtest; test for independence of residuals; null hypothesis: Errors are serially uncorrelated
-library(lmtest) 
-dwtest(lm_inc) 
+tsplot_nnmodvccmod(CanESM2_85_resultsdf, "CanESM2", "85")
+tsplot_nnmodvccmod(CNRMCM5_85_resultsdf, "CNRMCM5", "85")
+tsplot_nnmodvccmod(HadGEM2ES_85_resultsdf, "HadGEM2ES", "85")
+tsplot_nnmodvccmod(MIROC5_85_resultsdf, "MIROC5", "85")
 
-layout(matrix(c(1,2,3,4),2,2,byrow=T))
-plot(lm_inc$fitted, rstudent(lm_inc), main="Multi Fit Studentized Residuals", xlab="Predictions", ylab="Studentized Resid", ylim=c(-2.5,2.5))
-abline(h=0, lty=2)
-plot(results_inc$DATE, lm_inc$residuals, main="Residuals by Time", xlab="Time",ylab="Residuals")
-abline(h=0,lty=2)
-hist(lm_inc$residuals,main="Histogram of Residuals")
-qqnorm(lm_inc$residuals)
-qqline(lm_inc$residuals)
+tsplot_nnmodvccmod(CanESM2_45_resultsdf, "CanESM2", "45")
+tsplot_nnmodvccmod(CNRMCM5_45_resultsdf, "CNRMCM5", "45")
+tsplot_nnmodvccmod(HadGEM2ES_45_resultsdf, "HadGEM2ES", "45")
+tsplot_nnmodvccmod(MIROC5_45_resultsdf, "MIROC5", "45")
 ```
 
-```{r predict_lm_agg}
-results_agg$LMFIT <- lm_agg$fitted.values
-results_agg$LMRES <- lm_agg$residuals
+```{r ccprojvsnnpred_plot} 
+library(ggpmisc)
+# plot to see agreement
+cc_resultsdf$CCMODRCP <- factor(paste0(cc_resultsdf$CCMOD, " ", cc_resultsdf$RCP))
 
-layout(matrix(c(1,1,2,3),2,2,byrow=T))
-# response vs. residuals Plot
-results_agg_ordered <- results_agg[order(results_agg$FLOW),]
-plot(results_agg_ordered$LMRES ~ results_agg_ordered$FLOW, main="Unimpaired Flow vs. Residuals\nfor Multiple Linear Regression", xlab="Unimpaired Flow (AF)", ylab="Residuals")
-abline(h=0,lty=2)
-
-# histogram of residuals
-hist(results_agg_ordered$LMRES, main="Histogram of Residuals", ylab="Residuals")
-
-# q-q plot
-qqnorm(results_agg_ordered$LMRES)
-qqline(results_agg_ordered$LMRES)
-
-# residuals are normally distributed? test residuals for normality; null hypothesis: Skewness and Kurtosis are equal to zero
-library(fBasics)
-jarqueberaTest(lm_agg$resid) 
-
-# residuals are independent? dwtest; test for independence of residuals; null hypothesis: Errors are serially uncorrelated
-library(lmtest) 
-dwtest(lm_agg) 
-
-layout(matrix(c(1,2,3,4),2,2,byrow=T))
-plot(lm_agg$fitted, rstudent(lm_agg), main="Multi Fit Studentized Residuals", xlab="Predictions", ylab="Studentized Resid", ylim=c(-2.5,2.5))
-abline(h=0, lty=2)
-plot(results_agg$DATE, lm_agg$residuals, main="Residuals by Time", xlab="Time",ylab="Residuals")
-abline(h=0,lty=2)
-hist(lm_agg$residuals,main="Histogram of Residuals")
-qqnorm(lm_agg$residuals)
-qqline(lm_agg$residuals)
+png('ch5 climate change/outputdata/rplot52_obsvspred.png', width=6.5, height=6.5, units="in", pointsize=8, res=1200)
+  plottoprint <- ggplot(cc_resultsdf, aes(x=FLOW, y=CCFIT)) +
+    geom_point(aes(group=HIERARCHY, colour=HIERARCHY, shape=HIERARCHY)) +
+    geom_smooth(method="lm", se=FALSE, color="black")+
+    stat_poly_eq(formula = y ~ x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+    geom_abline(slope=1, intercept=0, color="black", linetype=3)+
+    facet_wrap(~CCMODRCP, ncol=2) +
+    scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+    scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+    labs(x ="Global Climate Model Runoff Projections (AF/m)", y = "NN Model Unimpaired Flow Predictions (AF/m)", color = "")+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+  print(plottoprint)
+dev.off()
 ```
 
-```{r predict_glm_inc}
+## 6.2 Density 
+```{r density}
+png('ch5 climate change/outputdata/rplot53_density.png', width=6.5, height=2.85, units="in", pointsize=8, res=1200)
+  plottoprint <- ggplot(cc_resultsdf) +
+    geom_density(aes(x=FLOW, group=CCMOD, colour=CCMOD)) +
+    scale_color_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]), name="GCM Projections")+
+    geom_density(data=cc_resultsdf, aes(x=CCFIT, fill=CCMOD), alpha=0.2) +
+    facet_wrap(~RCP, ncol=2)+
+    scale_fill_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]), name="NN Predictions")+
+    guides(fill = guide_legend(override.aes = list(alpha = 0.2)))+
+    scale_x_continuous(trans="log10")+
+    labs(x ="Runoff or Unimpaired Flow (AF/m)", y = "Density or Frequency of Occurance (%)", color = "")+
+    annotation_logticks(sides = "b")+
+    theme_bw(base_size = 8) +
+    theme(legend.text=element_text(size=10), text=element_text(size=10))
+  print(plottoprint)
+dev.off()
 
+# check it in seperate plots
+plottoprint1 <- ggplot(cc_resultsdf) +
+  geom_density(aes(x=FLOW, colour=CCMOD), show.legend = FALSE) +
+  scale_colour_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]))+
+  facet_wrap(~RCP, ncol=2)+
+  scale_x_continuous(trans="log10")+
+  labs(x ="GCM Routed Runoff Projections (AF/m)", y="")+
+  annotation_logticks(sides = "b")+
+  theme_bw(base_size = 8) +
+  theme(legend.text=element_text(size=10), text=element_text(size=10))
+
+plottoprint2 <- ggplot(cc_resultsdf) +
+  geom_density(aes(x=CCFIT, colour=CCMOD), show.legend = FALSE) +
+  scale_colour_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]), name="GCM Projections")+
+  facet_wrap(~RCP, ncol=2)+
+  scale_x_continuous(trans="log10")+
+  labs(x ="NN Model Unimpaired Flow Predictions (AF/m)", y="")+
+  annotation_logticks(sides = "b")+
+  theme_bw(base_size = 8) +
+  theme(legend.text=element_text(size=10), text=element_text(size=10))
+
+png('ch5 climate change/outputdata/rplot53_density2.png', width=6.5, height=2.85*2, units="in", pointsize=8, res=1200)
+  ggarrange(plottoprint1, plottoprint2, ncol=1)
+dev.off()
+
+# boxplot
+plottoprint1 <- ggplot(cc_resultsdf) +
+  geom_boxplot(aes(x=FLOW, y=CCMOD, colour=CCMOD), show.legend = FALSE) +
+  scale_colour_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]))+
+  facet_wrap(~RCP, ncol=2)+
+  scale_x_continuous(trans="log10")+
+  labs(x ="GCM Routed Runoff Projections (AF/m)", y="")+
+  annotation_logticks(sides = "b")+
+  theme_bw(base_size = 8) +
+  theme(legend.text=element_text(size=10), text=element_text(size=10))
+
+plottoprint2 <- ggplot(cc_resultsdf) +
+  geom_boxplot(aes(x=CCFIT, y=CCMOD, colour=CCMOD), show.legend = FALSE) +
+  scale_colour_manual(values=c(cbpblack[8], cbpblack[5], cbpblack[3], cbpblack[2]), name="GCM Projections")+
+  facet_wrap(~RCP, ncol=2)+
+  scale_x_continuous(trans="log10")+
+  labs(x ="NN Model Unimpaired Flow Predictions (AF/m)", y="")+
+  annotation_logticks(sides = "b")+
+  theme_bw(base_size = 8) +
+  theme(legend.text=element_text(size=10), text=element_text(size=10))
+
+png('ch5 climate change/outputdata/rplot53_boxplot.png', width=6.5, height=2.85*2, units="in", pointsize=8, res=1200)
+  ggarrange(plottoprint1, plottoprint2, ncol=1)
+dev.off()
 ```
 
-```{r predict_glm_agg}
+## 6.3 Monthly, Rolling Annual, Rolling 10 Year Runoff/UF
+```{r rolling_runoff}
+head(cc_resultsdf)
+cc_resultsdf_rolling1 <- aggregate(FLOW~DATE+HIERARCHY+CCMOD+RCP, data=cc_resultsdf, FUN=mean)
+cc_resultsdf_rolling2 <- aggregate(CCFIT~DATE+HIERARCHY+CCMOD+RCP, data=cc_resultsdf, FUN=mean)
+cc_resultsdf_rolling <- merge(cc_resultsdf_rolling1, cc_resultsdf_rolling2, by=c("DATE", "HIERARCHY", "CCMOD", "RCP"))
+cc_resultsdf_rolling_long <- melt(cc_resultsdf_rolling, id.vars=c("DATE", "HIERARCHY", "CCMOD", "RCP"), variable.name="FLOWTYPE", value.name="FLOW")
 
+# for facet wrapped plotting
+cc_resultsdf_rolling$CCMODRCP <- factor(paste0(cc_resultsdf_rolling$CCMOD, " ", cc_resultsdf_rolling$RCP))
+cc_resultsdf_rolling_long$CCMODRCP <- factor(paste0(cc_resultsdf_rolling_long$CCMOD, " ", cc_resultsdf_rolling_long$RCP))
+
+#######################################################################################################
+# first do monthly averages across CA
+plottoprint <- ggplot(cc_resultsdf_rolling_long, aes(x=DATE, y=FLOW, col=FLOWTYPE, linetype=FLOWTYPE))+
+  geom_line()+
+  xlab("")+
+  ylab("Mean California Unimpaired Flow (AF/m)")+
+  scale_colour_manual(name= "flowtype", values = cbpblack[c(1,8)], breaks=c("FLOW", "CCFIT"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction")) +
+  scale_linetype_manual(name= "flowtype", values= c("solid", "dotted"), breaks=c("FLOW", "CCFIT"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction"))+
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~CCMODRCP, ncol=2)+
+  theme_bw()+
+  theme(legend.position="right", legend.title = element_blank())
+
+png('ch5 climate change/outputdata/rplot58_camean_monthly_comp.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off()
+
+plottoprint <- ggplot(cc_resultsdf_rolling, aes(x=FLOW, y=CCFIT)) +
+    geom_point(aes(group=HIERARCHY, colour=HIERARCHY, shape=HIERARCHY)) +
+    geom_smooth(method="lm", se=FALSE, color="black")+
+    stat_poly_eq(formula = y ~ x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+    geom_abline(slope=1, intercept=0, color="black", linetype=3)+
+    scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+    scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+    labs(x ="Mean Global Climate Model Runoff Projections (AF/m)", y = "Mean NN Model Unimpaired Flow Predictions (AF/m)", color = "")+
+    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(labels = scales::comma) +
+    facet_wrap(~CCMODRCP, ncol=2)+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+
+png('ch5 climate change/outputdata/rplot58_camean_monthly_comp2.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off() 
+
+#######################################################################################################
+# now do annual averages across CA 
+library(zoo)
+cc_resultsdf_rolling_wide_flow <- dcast(cc_resultsdf_rolling, DATE ~ CCMODRCP + HIERARCHY, value.var="FLOW")
+cc_resultsdf_rolling_wide_ccfit <- dcast(cc_resultsdf_rolling, DATE ~ CCMODRCP + HIERARCHY, value.var="CCFIT")
+
+# first, flow
+tbd <- data.frame(rollapply(cc_resultsdf_rolling_wide_flow[ , 2:ncol(cc_resultsdf_rolling_wide_flow)], 12, by.column=TRUE, align="left", FUN=mean))
+tbd <- cbind(DATE=cc_resultsdf_rolling_wide_flow$DATE[1:(nrow(cc_resultsdf_rolling_wide_flow)-11)], tbd)
+tbd <- melt(tbd, id.vars=c("DATE"), variable.name="CCMODRCPH", value.name="FLOW_1YR")
+tbd$CCMODRCP <- factor(substring(tbd$CCMODRCPH, 1, (nchar(as.character(tbd$CCMODRCPH))-2)))
+tbd$HIERARCHY <- factor(substring(tbd$CCMODRCPH, nchar(as.character(tbd$CCMODRCPH))))
+tbd$CCMODRCP <- sub("\\.", " ", sub("\\.", " ", tbd$CCMODRCP))
+
+cc_resultsdf_rolling <- tbd
+
+# now, ccfit
+tbd <- data.frame(rollapply(cc_resultsdf_rolling_wide_ccfit[ , 2:ncol(cc_resultsdf_rolling_wide_ccfit)], 12, by.column=TRUE, align="left", FUN=mean))
+tbd <- cbind(DATE=cc_resultsdf_rolling_wide_ccfit$DATE[1:(nrow(cc_resultsdf_rolling_wide_ccfit)-11)], tbd)
+tbd <- melt(tbd, id.vars=c("DATE"), variable.name="CCMODRCPH", value.name="CCFIT_1YR")
+tbd$CCMODRCP <- factor(substring(tbd$CCMODRCPH, 1, (nchar(as.character(tbd$CCMODRCPH))-2)))
+tbd$HIERARCHY <- factor(substring(tbd$CCMODRCPH, nchar(as.character(tbd$CCMODRCPH))))
+tbd$CCMODRCP <- sub("\\.", " ", sub("\\.", " ", tbd$CCMODRCP))
+
+cc_resultsdf_rolling <- merge(cc_resultsdf_rolling, tbd, by=c("DATE", "CCMODRCP", "HIERARCHY"))
+cc_resultsdf_rolling_long <- melt(cc_resultsdf_rolling[, c("DATE", "HIERARCHY", "FLOW_1YR", "CCFIT_1YR", "CCMODRCP")], id.vars=c("DATE", "HIERARCHY", "CCMODRCP"), variable.name="FLOWTYPE", value.name="FLOW")
+cc_resultsdf_rolling_long$FLOWTYPE <- factor(cc_resultsdf_rolling_long$FLOWTYPE, levels=c("CCFIT_1YR", "FLOW_1YR"))
+plottoprint <- ggplot(cc_resultsdf_rolling_long, aes(x=DATE, y=FLOW, col=FLOWTYPE, linetype=FLOWTYPE))+
+  geom_line()+
+  xlab("")+
+  ylab("Mean California Unimpaired Flow 1 Year Moving Average (AF/m)")+
+  scale_colour_manual("flowtype", values = cbpblack[c(1, 8)], breaks=c("FLOW_1YR", "CCFIT_1YR"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction")) +
+  scale_linetype_manual("flowtype", values= c("solid", "dotted"), breaks=c("FLOW_1YR", "CCFIT_1YR"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction"))+
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~CCMODRCP, ncol=2)+
+  theme_bw()+
+  theme(legend.position="right", legend.title = element_blank())
+
+png('ch5 climate change/outputdata/rplot58_camean_annualrolling_comp.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off()
+
+plottoprint <- ggplot(cc_resultsdf_rolling, aes(x=FLOW_1YR, y=CCFIT_1YR)) +
+    geom_point(aes(group=HIERARCHY, colour=HIERARCHY, shape=HIERARCHY)) +
+    geom_smooth(method="lm", se=FALSE, color="black")+
+    stat_poly_eq(formula = y ~ x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+    geom_abline(slope=1, intercept=0, color="black", linetype=3)+
+    scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+    scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+    labs(x ="Mean Global Climate Model Runoff Projections 1 Year Moving Average (AF/m)", y = "Mean NN Model Unimpaired Flow Predictions 1 Year Moving Average (AF/m)", color = "")+
+    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(labels = scales::comma) +
+    facet_wrap(~CCMODRCP, ncol=2)+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+
+png('ch5 climate change/outputdata/rplot58_camean_annualrolling_comp2.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off() 
+
+#######################################################################################################
+# now do 10 year rolling averages across CA, only thing changed here is 120 instead of 12 months
+# first, flow
+tbd <- data.frame(rollapply(cc_resultsdf_rolling_wide_flow[ , 2:ncol(cc_resultsdf_rolling_wide_flow)], 120, by.column=TRUE, align="left", FUN=mean))
+tbd <- cbind(DATE=cc_resultsdf_rolling_wide_flow$DATE[1:(nrow(cc_resultsdf_rolling_wide_flow)-119)], tbd)
+tbd <- melt(tbd, id.vars=c("DATE"), variable.name="CCMODRCPH", value.name="FLOW_10YR")
+tbd$CCMODRCP <- factor(substring(tbd$CCMODRCPH, 1, (nchar(as.character(tbd$CCMODRCPH))-2)))
+tbd$HIERARCHY <- factor(substring(tbd$CCMODRCPH, nchar(as.character(tbd$CCMODRCPH))))
+tbd$CCMODRCP <- sub("\\.", " ", sub("\\.", " ", tbd$CCMODRCP))
+
+cc_resultsdf_rolling <- tbd
+
+# now, ccfit
+tbd <- data.frame(rollapply(cc_resultsdf_rolling_wide_ccfit[ , 2:ncol(cc_resultsdf_rolling_wide_ccfit)], 120, by.column=TRUE, align="left", FUN=mean))
+tbd <- cbind(DATE=cc_resultsdf_rolling_wide_ccfit$DATE[1:(nrow(cc_resultsdf_rolling_wide_ccfit)-119)], tbd)
+tbd <- melt(tbd, id.vars=c("DATE"), variable.name="CCMODRCPH", value.name="CCFIT_10YR")
+tbd$CCMODRCP <- factor(substring(tbd$CCMODRCPH, 1, (nchar(as.character(tbd$CCMODRCPH))-2)))
+tbd$HIERARCHY <- factor(substring(tbd$CCMODRCPH, nchar(as.character(tbd$CCMODRCPH))))
+tbd$CCMODRCP <- sub("\\.", " ", sub("\\.", " ", tbd$CCMODRCP))
+
+cc_resultsdf_rolling <- merge(cc_resultsdf_rolling, tbd, by=c("DATE", "CCMODRCP", "HIERARCHY"))
+cc_resultsdf_rolling_long <- melt(cc_resultsdf_rolling[, c("DATE", "HIERARCHY", "FLOW_10YR", "CCFIT_10YR", "CCMODRCP")], id.vars=c("DATE", "HIERARCHY", "CCMODRCP"), variable.name="FLOWTYPE", value.name="FLOW")
+cc_resultsdf_rolling_long$FLOWTYPE <- factor(cc_resultsdf_rolling_long$FLOWTYPE, levels=c("CCFIT_10YR", "FLOW_10YR"))
+
+plottoprint <- ggplot(cc_resultsdf_rolling_long, aes(x=DATE, y=FLOW, col=FLOWTYPE, linetype=FLOWTYPE))+
+  geom_line()+
+  xlab("")+
+  ylab("Mean California Unimpaired Flow 10 Year Moving Average (AF/m)")+
+  scale_colour_manual("flowtype", values = cbpblack[c(1, 8)], breaks=c("FLOW_10YR", "CCFIT_10YR"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction")) +
+  scale_linetype_manual("flowtype", values= c("solid", "dotted"), breaks=c("FLOW_10YR", "CCFIT_10YR"), labels=c("GCM Routed\nRunoff Projections", "NN LOGO MSE\nModel Prediction"))+
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~CCMODRCP, ncol=2)+
+  theme_bw()+
+  theme(legend.position="right", legend.title = element_blank())
+
+png('ch5 climate change/outputdata/rplot58_camean_10yr_rolling_comp.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off()
+
+plottoprint <- ggplot(cc_resultsdf_rolling, aes(x=FLOW_10YR, y=CCFIT_10YR)) +
+    geom_point(aes(group=HIERARCHY, colour=HIERARCHY, shape=HIERARCHY)) +
+    geom_smooth(method="lm", se=FALSE, color="black")+
+    stat_poly_eq(formula = y ~ x, 
+                aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+                parse = TRUE) +
+    geom_abline(slope=1, intercept=0, color="black", linetype=3)+
+    scale_color_manual(values=c(cbpblack[2], cbpblack[3], cbpblack[4], cbpblack[5], cbpblack[6]), name="Hierarchy")+
+    scale_shape_manual(values=c(1, 16, 2, 0, 15), name="Hierarchy") +
+    labs(x ="Mean Global Climate Model Runoff Projections 10 Year Moving Average (AF/m)", y = "Mean NN Model Unimpaired Flow Predictions 10 Year Moving Average (AF/m)", color = "")+
+    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(labels = scales::comma) +
+    facet_wrap(~CCMODRCP, ncol=2)+
+    theme(legend.text=element_text(size=10), text=element_text(size=10))+
+    theme_bw(base_size = 8)
+
+png('ch5 climate change/outputdata/rplot58_camean_10yr_rolling_comp2.png', width=6.5, height=8, units="in", pointsize=8, res=1200)  
+  print(plottoprint)
+dev.off() 
 ```
-
-```{r predict_tf_inc}
-
-```
-
-```{r predict_tf_agg}
-
-```
-
 
 
 
